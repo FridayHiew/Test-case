@@ -416,24 +416,141 @@ This is a known compatibility issue between certain GPU/graphics driver configur
 
   // Helper to parse and clean response JSON string
   private parseAndCleanJson(rawText: string): TestResult {
-    try {
-      let cleaned = rawText.trim();
-      if (cleaned.startsWith('```')) {
+    let cleaned = rawText.trim();
+    
+    // 1. Strip markdown code blocks if any
+    if (cleaned.startsWith('```')) {
+      const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (match && match[1]) {
+        cleaned = match[1].trim();
+      } else {
         const lines = cleaned.split('\n');
-        cleaned = lines.filter(line => !line.trim().startsWith('```')).join('\n');
+        cleaned = lines.filter(line => !line.trim().startsWith('```')).join('\n').trim();
       }
-      cleaned = cleaned.trim();
-      const parsed = JSON.parse(cleaned);
-
-      if (!parsed.test_cases || !Array.isArray(parsed.test_cases)) {
-        throw new Error('Returned JSON missing "test_cases" array.');
-      }
-
-      return parsed as TestResult;
-    } catch (err: any) {
-      console.error('Failed to parse LLM Response:', rawText, err);
-      throw new Error(`Unable to parse JSON returned by model: ${err.message || 'Formatting error'}.`);
     }
+
+    // 2. If it still doesn't look like JSON, try to extract from the first { to the last }
+    // or from the first [ to the last ]
+    if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) {
+      const braceStartIndex = cleaned.indexOf('{');
+      const braceEndIndex = cleaned.lastIndexOf('}');
+      const bracketStartIndex = cleaned.indexOf('[');
+      const bracketEndIndex = cleaned.lastIndexOf(']');
+
+      if (braceStartIndex !== -1 && braceEndIndex !== -1 && (bracketStartIndex === -1 || braceStartIndex < bracketStartIndex)) {
+        cleaned = cleaned.substring(braceStartIndex, braceEndIndex + 1);
+      } else if (bracketStartIndex !== -1 && bracketEndIndex !== -1) {
+        cleaned = cleaned.substring(bracketStartIndex, bracketEndIndex + 1);
+      }
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err: any) {
+      // 3. Fallback: try to clean up trailing commas which break standard JSON.parse
+      try {
+        const relaxedCleaned = cleaned
+          .replace(/,(\s*[\]}])/g, '$1') // remove trailing commas
+          .replace(/[\u201C\u201D]/g, '"'); // replace smart quotes
+        parsed = JSON.parse(relaxedCleaned);
+      } catch (innerErr) {
+        console.error('Failed to parse raw LLM response as JSON. Raw output:', rawText);
+        throw new Error(`Unable to parse JSON returned by model: ${err.message || 'Formatting error'}.`);
+      }
+    }
+
+    // 4. Normalize the parsed structure into a valid TestResult
+    const result: TestResult = {
+      test_cases: [],
+      coverage: []
+    };
+
+    if (Array.isArray(parsed)) {
+      // Direct array returned by the model
+      result.test_cases = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      // Check for common variations of 'test_cases'
+      const possibleCaseKeys = ['test_cases', 'testCases', 'cases', 'testcases', 'test-cases', 'results', 'data', 'list'];
+      let foundCases = false;
+
+      for (const key of possibleCaseKeys) {
+        if (parsed[key] && Array.isArray(parsed[key])) {
+          result.test_cases = parsed[key];
+          foundCases = true;
+          break;
+        }
+      }
+
+      // If still not found, search the object keys for any array of objects
+      if (!foundCases) {
+        for (const key of Object.keys(parsed)) {
+          if (Array.isArray(parsed[key]) && parsed[key].length > 0 && typeof parsed[key][0] === 'object') {
+            result.test_cases = parsed[key];
+            foundCases = true;
+            break;
+          }
+        }
+      }
+
+      // Set coverage
+      if (parsed.coverage && Array.isArray(parsed.coverage)) {
+        result.coverage = parsed.coverage.map((c: any) => String(c));
+      } else if (parsed.coverage && typeof parsed.coverage === 'string') {
+        result.coverage = [parsed.coverage];
+      }
+    } else {
+      throw new Error('Model output is not a valid JSON object or array.');
+    }
+
+    // 5. Clean, sanitize and validate each test case item to guarantee UI compatibility
+    if (!Array.isArray(result.test_cases)) {
+      result.test_cases = [];
+    }
+
+    result.test_cases = result.test_cases.map((tc: any, index: number) => {
+      // Make sure we have some base object
+      const safeTc = typeof tc === 'object' && tc !== null ? tc : {};
+      
+      // Ensure preconditions is an array of strings
+      let finalPreconditions: string[] = [];
+      if (Array.isArray(safeTc.preconditions)) {
+        finalPreconditions = safeTc.preconditions.map((p: any) => String(p));
+      } else if (typeof safeTc.preconditions === 'string') {
+        finalPreconditions = [safeTc.preconditions];
+      }
+
+      // Ensure steps is an array of strings
+      let finalSteps: string[] = [];
+      if (Array.isArray(safeTc.steps)) {
+        finalSteps = safeTc.steps.map((s: any) => String(s));
+      } else if (typeof safeTc.steps === 'string') {
+        finalSteps = [safeTc.steps];
+      }
+
+      // Ensure type fits 'positive' | 'negative' | 'boundary' | 'security' | 'performance'
+      const rawType = String(safeTc.type || 'positive').toLowerCase();
+      let finalType: 'positive' | 'negative' | 'boundary' | 'security' | 'performance' = 'positive';
+      if (['positive', 'negative', 'boundary', 'security', 'performance'].includes(rawType)) {
+        finalType = rawType as any;
+      }
+
+      return {
+        id: String(safeTc.id || `tc-${index + 1}`),
+        title: String(safeTc.title || `Test Case ${index + 1}`),
+        type: finalType,
+        preconditions: finalPreconditions,
+        steps: finalSteps.length > 0 ? finalSteps : ['Perform integration tests'],
+        expected: String(safeTc.expected || 'System performs as expected.')
+      };
+    });
+
+    // Populate default coverage if missing
+    if (result.coverage.length === 0) {
+      result.coverage = ['General specification coverage verification'];
+    }
+
+    return result;
   }
 }
 
