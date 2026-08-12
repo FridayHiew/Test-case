@@ -412,6 +412,7 @@ export default function TestCaseGenerator({
                       boundary: 'bg-amber-50 text-amber-700 border-amber-100',
                       security: 'bg-purple-50 text-purple-700 border-purple-100',
                       performance: 'bg-blue-50 text-blue-700 border-blue-100',
+                      business_rule: 'bg-indigo-50 text-indigo-700 border-indigo-100',
                     };
                     const typeLabel: Record<string, string> = {
                       positive: 'Positive',
@@ -419,6 +420,7 @@ export default function TestCaseGenerator({
                       boundary: 'Boundary',
                       security: 'Security',
                       performance: 'Performance',
+                      business_rule: 'Business Rule',
                     };
 
                     return (

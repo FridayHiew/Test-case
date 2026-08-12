@@ -22,11 +22,12 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [editType, setEditType] = useState<'positive' | 'negative' | 'boundary' | 'security' | 'performance'>('positive');
+  const [editType, setEditType] = useState<'positive' | 'negative' | 'boundary' | 'security' | 'performance' | 'business_rule'>('positive');
   const [editPreconditions, setEditPreconditions] = useState('');
   const [editSteps, setEditSteps] = useState('');
   const [editExpected, setEditExpected] = useState('');
   const [editCaseCount, setEditCaseCount] = useState<number>(1);
+  const [editAiPrompt, setEditAiPrompt] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -131,6 +132,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
     setEditSteps(template.steps.join('\n'));
     setEditExpected(template.expected);
     setEditCaseCount(template.caseCount || 1);
+    setEditAiPrompt(template.aiPrompt || '');
   };
 
   const handleSaveEdit = (id: string) => {
@@ -143,7 +145,8 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
           preconditions: editPreconditions.split('\n').map(l => l.trim()).filter(Boolean),
           steps: editSteps.split('\n').map(l => l.trim()).filter(Boolean),
           expected: editExpected,
-          caseCount: editCaseCount
+          caseCount: editCaseCount,
+          aiPrompt: editAiPrompt.trim() ? editAiPrompt.trim() : undefined
         };
       }
       return t;
@@ -197,7 +200,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
             <h2 className="text-lg font-semibold text-slate-900">Baseline Case Structure Templates</h2>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 leading-relaxed max-w-2xl">
-            Configure code-level test cases that generate programmatically. Adjust the <strong>Cases Count</strong> slider on each template to create multiple distinct branch variations per category.
+            Configure custom baseline templates used by the AI model to validate intricate business workflows and E2E requirements (light load). The system's programmatic engine automatically handles the heavy lifting by creating detailed validation test cases for every defined form field.
           </p>
         </div>
 
@@ -275,6 +278,10 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
             <span className="font-bold text-blue-700"><code>{`{dependencies}`}</code></span>
             <span className="text-slate-500 text-[10px]">Injects upstream module state prerequisites</span>
           </div>
+          <div className="p-3 bg-purple-50 rounded-lg border border-purple-100 flex flex-col space-y-1">
+            <span className="font-bold text-purple-700"><code>{`{rule}`}</code></span>
+            <span className="text-slate-500 text-[10px]">Replaced with the individual target business rule text</span>
+          </div>
         </div>
       </div>
 
@@ -303,9 +310,10 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                       template.type === 'negative' ? 'bg-rose-50 text-rose-700 border border-rose-100' :
                       template.type === 'boundary' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
                       template.type === 'security' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' :
+                      template.type === 'business_rule' ? 'bg-purple-50 text-purple-700 border border-purple-100' :
                       'bg-slate-100 text-slate-700'
                     }`}>
-                      {template.type}
+                      {template.type === 'business_rule' ? 'Business Rule' : template.type}
                     </span>
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
                       Generates {template.caseCount || 1} { (template.caseCount || 1) === 1 ? 'case' : 'cases' }
@@ -373,6 +381,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                         <option value="boundary">Boundary (Limits Check)</option>
                         <option value="security">Security (Injection Guard)</option>
                         <option value="performance">Performance (Load Guard)</option>
+                        <option value="business_rule">Business Rule (Rule Unit Validation)</option>
                       </select>
                     </div>
 
@@ -432,6 +441,24 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                     />
                   </div>
 
+                  {/* AI Prompt Guidance Field */}
+                  <div className="bg-purple-50/40 p-3.5 border border-purple-100 rounded-xl space-y-1.5">
+                    <label className="block text-[10px] uppercase font-bold text-purple-700 tracking-wider flex items-center">
+                      <Sparkles className="w-3.5 h-3.5 mr-1 text-purple-600" />
+                      AI Prompt / Special Guidance (Optional)
+                    </label>
+                    <textarea
+                      value={editAiPrompt}
+                      onChange={(e) => setEditAiPrompt(e.target.value)}
+                      rows={2}
+                      className="w-full p-3 border border-purple-200 rounded-lg bg-white focus:ring-2 focus:ring-purple-500 outline-none font-sans text-xs text-slate-800"
+                      placeholder="Provide special instructions or specific scenario directives for AI test case generation (e.g., 'Focus on edge cases where transaction amount exceeds threshold or currency conversion applies')."
+                    />
+                    <p className="text-[10px] text-purple-600/80">
+                      When populated, this directive is injected into the AI model's prompt to customize test case generation for special scenarios.
+                    </p>
+                  </div>
+
                   <div className="flex justify-end space-x-2 pt-2 border-t border-slate-200/60">
                     <button
                       type="button"
@@ -474,6 +501,16 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                     <span className="text-[10px] uppercase font-bold text-blue-500 block tracking-wider mb-0.5">Expected Outcome</span>
                     <span className="text-slate-700 text-xs font-semibold leading-relaxed block">{template.expected}</span>
                   </div>
+
+                  {template.aiPrompt && (
+                    <div className="p-3 bg-purple-50/50 rounded-lg border border-purple-100">
+                      <span className="text-[10px] uppercase font-bold text-purple-600 tracking-wider mb-0.5 flex items-center">
+                        <Sparkles className="w-3 h-3 mr-1 text-purple-500" />
+                        AI Prompt Directives / Scenario Guidance
+                      </span>
+                      <span className="text-purple-950 text-xs font-medium leading-relaxed block">{template.aiPrompt}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

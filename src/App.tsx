@@ -44,7 +44,13 @@ export default function App() {
     const saved = localStorage.getItem('TestGen_Config');
     if (saved) {
       try {
-        return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        // Self-healing check: if they have the legacy 'happy-path' template, wipe programmaticTemplates
+        // so it defaults to the new, streamlined business logic AI template.
+        if (parsed.programmaticTemplates && parsed.programmaticTemplates.some((t: any) => t.id === 'happy-path')) {
+          delete parsed.programmaticTemplates;
+        }
+        return { ...DEFAULT_CONFIG, ...parsed };
       } catch {
         return DEFAULT_CONFIG;
       }

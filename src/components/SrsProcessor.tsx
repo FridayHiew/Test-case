@@ -73,6 +73,8 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
     let name = 'Untitled Feature';
     let version = '1.0';
     let description = '';
+    let assumptions = '';
+    let reference = '';
     const input_fields: InputField[] = [];
     const business_rules: string[] = [];
     const output: Record<string, string> = {};
@@ -112,6 +114,18 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
         continue;
       }
 
+      const assumptionsMatch = line.match(/^\*\*Assumptions:\*\*\s*(.*)$/i) || line.match(/^Assumptions:\s*(.*)$/i) || line.match(/^\*\*Pre-conditions:\*\*\s*(.*)$/i) || line.match(/^Pre-conditions:\s*(.*)$/i);
+      if (assumptionsMatch) {
+        assumptions = assumptionsMatch[1].replace(/[*_]/g, '').trim();
+        continue;
+      }
+
+      const referenceMatch = line.match(/^\*\*Reference:\*\*\s*(.*)$/i) || line.match(/^Reference:\s*(.*)$/i) || line.match(/^\*\*References:\*\*\s*(.*)$/i) || line.match(/^References:\s*(.*)$/i);
+      if (referenceMatch) {
+        reference = referenceMatch[1].replace(/[*_]/g, '').trim();
+        continue;
+      }
+
       // Check for Section headers
       if (line.startsWith('##')) {
         const secHeader = line.toLowerCase();
@@ -141,6 +155,8 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             const minMatch = line.match(/min:\s*(\d+)/i);
             const maxMatch = line.match(/max:\s*(\d+)/i);
             const formatMatch = line.match(/format:\s*([\w|]+)/i);
+            const descMatch = line.match(/description:\s*["']([^"']+)["']/i) || line.match(/desc:\s*["']([^"']+)["']/i);
+            const valMatch = line.match(/validation:\s*["']([^"']+)["']/i) || line.match(/val:\s*["']([^"']+)["']/i);
 
             const inputField: InputField = {
               name: fieldName,
@@ -151,6 +167,8 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             if (minMatch) inputField.min = parseInt(minMatch[1], 10);
             if (maxMatch) inputField.max = parseInt(maxMatch[1], 10);
             if (formatMatch) inputField.format = formatMatch[1];
+            if (descMatch) inputField.description = descMatch[1];
+            if (valMatch) inputField.validation = valMatch[1];
 
             input_fields.push(inputField);
           }
@@ -234,10 +252,12 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
       name,
       version,
       description: description || `Specifications parsed for feature ${name}`,
+      assumptions: assumptions ? assumptions : undefined,
       input_fields,
       business_rules,
       output,
-      dependencies
+      dependencies,
+      reference: reference ? reference : undefined
     };
   };
 

@@ -29,10 +29,12 @@ export default function FeatureManager({
   const [featureName, setFeatureName] = useState('');
   const [featureVersion, setFeatureVersion] = useState('1.0');
   const [featureDescription, setFeatureDescription] = useState('');
+  const [featureAssumptions, setFeatureAssumptions] = useState('');
   const [inputFields, setInputFields] = useState<InputField[]>([]);
   const [businessRules, setBusinessRules] = useState<string[]>([]);
   const [outputObj, setOutputObj] = useState<Record<string, string>>({});
   const [dependencies, setDependencies] = useState<string[]>([]);
+  const [featureReference, setFeatureReference] = useState('');
 
   // Advanced Raw JSON Editor Toggle
   const [isRawJsonMode, setIsRawJsonMode] = useState(false);
@@ -48,6 +50,8 @@ export default function FeatureManager({
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('string');
   const [newFieldRequired, setNewFieldRequired] = useState(true);
+  const [newFieldDescription, setNewFieldDescription] = useState('');
+  const [newFieldValidation, setNewFieldValidation] = useState('');
 
   // Business Rule Helpers
   const [newRuleText, setNewRuleText] = useState('');
@@ -70,9 +74,13 @@ export default function FeatureManager({
     setInputFields([...inputFields, {
       name: newFieldName.trim(),
       type: newFieldType,
-      required: newFieldRequired
+      required: newFieldRequired,
+      description: newFieldDescription.trim() || undefined,
+      validation: newFieldValidation.trim() || undefined
     }]);
     setNewFieldName('');
+    setNewFieldDescription('');
+    setNewFieldValidation('');
   };
 
   const handleRemoveField = (idx: number) => {
@@ -107,10 +115,12 @@ export default function FeatureManager({
     setFeatureName('');
     setFeatureVersion('1.0');
     setFeatureDescription('');
+    setFeatureAssumptions('');
     setInputFields([]);
     setBusinessRules([]);
     setOutputObj({});
     setDependencies([]);
+    setFeatureReference('');
     setIsEditing(true);
     setIsRawJsonMode(false);
   };
@@ -121,10 +131,12 @@ export default function FeatureManager({
     setFeatureName(feat.name);
     setFeatureVersion(feat.version);
     setFeatureDescription(feat.description);
+    setFeatureAssumptions(feat.assumptions || '');
     setInputFields(feat.input_fields);
     setBusinessRules(feat.business_rules);
     setOutputObj(feat.output);
     setDependencies(feat.dependencies || []);
+    setFeatureReference(feat.reference || '');
     
     // Format JSON text in case they switch to raw json mode
     setRawJsonText(JSON.stringify(feat, null, 2));
@@ -163,10 +175,12 @@ export default function FeatureManager({
           name: featureName.trim(),
           version: featureVersion.trim() || '1.0',
           description: featureDescription.trim(),
+          assumptions: featureAssumptions.trim() || undefined,
           input_fields: inputFields,
           business_rules: businessRules,
           output: outputObj,
-          dependencies: dependencies
+          dependencies: dependencies,
+          reference: featureReference.trim() || undefined
         };
       }
 
@@ -216,10 +230,12 @@ export default function FeatureManager({
         name: featureName,
         version: featureVersion,
         description: featureDescription,
+        assumptions: featureAssumptions,
         input_fields: inputFields,
         business_rules: businessRules,
         output: outputObj,
-        dependencies: dependencies
+        dependencies: dependencies,
+        reference: featureReference
       };
       setRawJsonText(JSON.stringify(currentObj, null, 2));
     } else {
@@ -230,10 +246,12 @@ export default function FeatureManager({
         setFeatureName(parsed.name || '');
         setFeatureVersion(parsed.version || '1.0');
         setFeatureDescription(parsed.description || '');
+        setFeatureAssumptions(parsed.assumptions || '');
         setInputFields(parsed.input_fields || []);
         setBusinessRules(parsed.business_rules || []);
         setOutputObj(parsed.output || {});
         setDependencies(parsed.dependencies || []);
+        setFeatureReference(parsed.reference || '');
       } catch (e) {
         showMessage('Current JSON has syntax errors. Please fix before returning to visual form.', 'error');
         return;
@@ -514,70 +532,107 @@ export default function FeatureManager({
                     />
                   </div>
 
+                  {/* Assumptions / Pre-conditions */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Assumptions & Pre-conditions</label>
+                    <textarea
+                      value={featureAssumptions}
+                      onChange={(e) => setFeatureAssumptions(e.target.value)}
+                      className="w-full px-3 py-1.5 h-16 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                      placeholder="e.g. User is authenticated, payment account balance is positive, database index is updated..."
+                    />
+                  </div>
+
                   {/* Input Fields Section */}
                   <div className="border border-slate-100 rounded-lg p-3 bg-slate-50/30">
                     <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">1. Input Fields</h4>
                     <div className="space-y-2">
                       {/* Field Inputs List */}
                       {inputFields.map((f, i) => (
-                        <div key={i} className="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-slate-200/60 text-xs">
-                          <span className="font-mono font-medium text-slate-800">
-                            {f.name} <span className="text-slate-400">({f.type})</span>
-                            {f.required && <span className="text-rose-500 ml-1">*Required</span>}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveField(i)}
-                            className="text-slate-400 hover:text-rose-600 transition p-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        <div key={i} className="bg-white px-3 py-2 rounded-lg border border-slate-200/60 text-xs space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-bold text-slate-800">
+                              {f.name} <span className="text-slate-400 font-normal">({f.type})</span>
+                              {f.required && <span className="text-rose-600 font-semibold ml-1.5">*Required</span>}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveField(i)}
+                              className="text-slate-400 hover:text-rose-600 transition p-1"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          {(f.description || f.validation) && (
+                            <div className="text-[11px] text-slate-500 pl-2 border-l-2 border-slate-100 space-y-0.5">
+                              {f.description && <div><span className="font-medium text-slate-400">Desc:</span> {f.description}</div>}
+                              {f.validation && <div><span className="font-medium text-slate-400">Val:</span> {f.validation}</div>}
+                            </div>
+                          )}
                         </div>
                       ))}
 
                       {/* Add field tools */}
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-2 pt-2 border-t border-dashed border-slate-200">
-                        <div className="md:col-span-5">
+                      <div className="space-y-2 pt-2 border-t border-dashed border-slate-200">
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                          <div className="md:col-span-5">
+                            <input
+                              type="text"
+                              value={newFieldName}
+                              onChange={(e) => setNewFieldName(e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white outline-none"
+                              placeholder="Field name (e.g. phone, username)"
+                            />
+                          </div>
+                          <div className="md:col-span-3">
+                            <select
+                              value={newFieldType}
+                              onChange={(e) => setNewFieldType(e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white outline-none"
+                            >
+                              <option value="string">String</option>
+                              <option value="number">Number</option>
+                              <option value="boolean">Boolean</option>
+                              <option value="array">Array</option>
+                              <option value="object">Object</option>
+                            </select>
+                          </div>
+                          <div className="md:col-span-2 flex items-center justify-center">
+                            <label className="flex items-center text-xs text-slate-600 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={newFieldRequired}
+                                onChange={(e) => setNewFieldRequired(e.target.checked)}
+                                className="mr-1 rounded text-blue-600 focus:ring-blue-500"
+                              />
+                              Required
+                            </label>
+                          </div>
+                          <div className="md:col-span-2">
+                            <button
+                              type="button"
+                              onClick={handleAddField}
+                              className="w-full py-1 bg-slate-800 text-white rounded hover:bg-slate-700 font-semibold text-xs transition"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                           <input
                             type="text"
-                            value={newFieldName}
-                            onChange={(e) => setNewFieldName(e.target.value)}
+                            value={newFieldDescription}
+                            onChange={(e) => setNewFieldDescription(e.target.value)}
                             className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white outline-none"
-                            placeholder="Field name (e.g. phone, username)"
+                            placeholder="Field Description (e.g. Unique registered email)"
                           />
-                        </div>
-                        <div className="md:col-span-3">
-                          <select
-                            value={newFieldType}
-                            onChange={(e) => setNewFieldType(e.target.value)}
+                          <input
+                            type="text"
+                            value={newFieldValidation}
+                            onChange={(e) => setNewFieldValidation(e.target.value)}
                             className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white outline-none"
-                          >
-                            <option value="string">String</option>
-                            <option value="number">Number</option>
-                            <option value="boolean">Boolean</option>
-                            <option value="array">Array</option>
-                            <option value="object">Object</option>
-                          </select>
-                        </div>
-                        <div className="md:col-span-2 flex items-center justify-center">
-                          <label className="flex items-center text-xs text-slate-600 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={newFieldRequired}
-                              onChange={(e) => setNewFieldRequired(e.target.checked)}
-                              className="mr-1 rounded text-blue-600 focus:ring-blue-500"
-                            />
-                            Required
-                          </label>
-                        </div>
-                        <div className="md:col-span-2">
-                          <button
-                            type="button"
-                            onClick={handleAddField}
-                            className="w-full py-1 bg-slate-800 text-white rounded hover:bg-slate-700 font-semibold text-xs transition"
-                          >
-                            Add
-                          </button>
+                            placeholder="Validation Rules (e.g. min: 3, max: 255, email)"
+                          />
                         </div>
                       </div>
                     </div>
@@ -676,6 +731,17 @@ export default function FeatureManager({
                       </div>
                     </div>
                   </div>
+
+                  {/* Reference for Future Use */}
+                  <div className="border border-slate-100 rounded-lg p-3 bg-slate-50/30">
+                    <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">4. Reference (For Future Use)</h4>
+                    <textarea
+                      value={featureReference}
+                      onChange={(e) => setFeatureReference(e.target.value)}
+                      className="w-full px-3 py-1.5 h-16 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none bg-white text-xs"
+                      placeholder="Add external links, swagger docs, system design specifications, or general system maps here..."
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -748,6 +814,14 @@ export default function FeatureManager({
                 <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedFeature.description}</p>
               </div>
 
+              {/* Assumptions & Pre-conditions */}
+              {selectedFeature.assumptions && (
+                <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-100/80">
+                  <h3 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Assumptions & Pre-conditions</h3>
+                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedFeature.assumptions}</p>
+                </div>
+              )}
+
               {/* Grid: Inputs and Outputs */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Input Fields */}
@@ -760,20 +834,36 @@ export default function FeatureManager({
                   ) : (
                     <div className="border border-slate-100 rounded-xl divide-y divide-slate-100 overflow-hidden bg-white">
                       {selectedFeature.input_fields.map((field, idx) => (
-                        <div key={idx} className="p-3 flex items-center justify-between text-xs hover:bg-slate-50/40 transition">
-                          <span className="font-mono font-bold text-slate-700">{field.name}</span>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-mono text-slate-400">{field.type}</span>
-                            {field.required ? (
-                              <span className="text-[10px] font-semibold bg-rose-50 text-rose-600 border border-rose-100/60 px-1.5 py-0.5 rounded">
-                                Required
-                              </span>
-                            ) : (
-                              <span className="text-[10px] bg-slate-50 text-slate-400 border border-slate-100 px-1.5 py-0.5 rounded">
-                                Optional
-                              </span>
-                            )}
+                        <div key={idx} className="p-3 hover:bg-slate-50/40 transition text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-bold text-slate-700">{field.name}</span>
+                            <div className="flex items-center space-x-2">
+                              <span className="font-mono text-slate-400">{field.type}</span>
+                              {field.required ? (
+                                <span className="text-[10px] font-semibold bg-rose-50 text-rose-600 border border-rose-100/60 px-1.5 py-0.5 rounded">
+                                  Required
+                                </span>
+                              ) : (
+                                <span className="text-[10px] bg-slate-50 text-slate-400 border border-slate-100 px-1.5 py-0.5 rounded">
+                                  Optional
+                                </span>
+                              )}
+                            </div>
                           </div>
+                          {(field.description || field.validation) && (
+                            <div className="text-[11px] text-slate-500 pl-2.5 border-l-2 border-slate-200/80 space-y-1 mt-1 leading-relaxed">
+                              {field.description && (
+                                <div>
+                                  <strong className="text-slate-400">Description:</strong> {field.description}
+                                </div>
+                              )}
+                              {field.validation && (
+                                <div>
+                                  <strong className="text-slate-400">Validation:</strong> <code className="font-mono bg-slate-100 text-slate-700 px-1 py-0.5 rounded text-[10px]">{field.validation}</code>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -828,6 +918,14 @@ export default function FeatureManager({
                       </span>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Reference */}
+              {selectedFeature.reference && (
+                <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-100/80">
+                  <h3 className="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Reference</h3>
+                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedFeature.reference}</p>
                 </div>
               )}
             </div>

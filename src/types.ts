@@ -5,6 +5,8 @@ export interface InputField {
   format?: string;
   min?: number;
   max?: number;
+  description?: string;
+  validation?: string;
 }
 
 export interface Feature {
@@ -12,16 +14,18 @@ export interface Feature {
   name: string;
   version: string;
   description: string;
+  assumptions?: string;
   input_fields: InputField[];
   business_rules: string[];
   output: Record<string, string>;
   dependencies?: string[];
+  reference?: string;
 }
 
 export interface TestCase {
   id: string;
   title: string;
-  type: 'positive' | 'negative' | 'boundary' | 'security' | 'performance';
+  type: 'positive' | 'negative' | 'boundary' | 'security' | 'performance' | 'business_rule';
   preconditions: string[];
   steps: string[];
   expected: string;
@@ -43,12 +47,13 @@ export interface CacheEntry {
 export interface BaseCaseTemplate {
   id: string;
   title: string;
-  type: 'positive' | 'negative' | 'boundary' | 'security' | 'performance';
+  type: 'positive' | 'negative' | 'boundary' | 'security' | 'performance' | 'business_rule';
   enabled: boolean;
   preconditions: string[];
   steps: string[];
   expected: string;
   caseCount?: number;
+  aiPrompt?: string;
 }
 
 export interface E2ETestCase {

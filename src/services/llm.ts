@@ -2,180 +2,40 @@ import { AIConfig, Feature, TestResult, BaseCaseTemplate, E2ETestCase } from '..
 
 export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
   {
-    id: 'happy-path',
-    title: 'Verify happy-path execution of "{feature_name}" with fully compliant inputs',
+    id: 'ai-light-business-logic',
+    title: 'Verify custom business workflows and E2E business constraints for "{feature_name}"',
     type: 'positive',
     enabled: true,
-    caseCount: 2,
+    caseCount: 1,
     preconditions: [
       '{dependencies}',
-      'Subsystem "{feature_name}" is loaded and fully responsive.'
+      'Ensure the active environment state satisfies general specifications.'
     ],
     steps: [
-      '1. Navigate to the "{feature_name}" workspace interface.',
-      '2. Fill in all required fields ({required_inputs}) with valid mock values.',
-      '3. Submit the transaction or click the action button.'
+      '1. Initialize the workflow interface for "{feature_name}".',
+      '2. Submit inputs adhering to the custom business rules and functional constraints: {business_rules}.',
+      '3. Verify that the state outputs successfully map to: {output_names}.'
     ],
-    expected: 'The system processes the request successfully. Output contract [{output_names}] is generated correctly according to the specifications.'
+    expected: 'The application computes the target output values exactly as specified by the business rules and updates the system state.',
+    aiPrompt: 'Focus on verifying end-to-end integration flows and complex state transitions across system components.'
   },
   {
-    id: 'input-validation',
-    title: 'Verify input validation locks when required fields are left blank',
-    type: 'negative',
+    id: 'business-rule-baseline',
+    title: 'Verify Business Rule Enforcement: "{rule}"',
+    type: 'business_rule',
     enabled: true,
     caseCount: 1,
     preconditions: [
-      'Subsystem "{feature_name}" is loaded.',
-      'User is viewing the input form fields.'
+      '{dependencies}',
+      'System state satisfies prerequisite conditions for rule: "{rule}".'
     ],
     steps: [
-      '1. Intentionally clear all required fields: {required_inputs}.',
-      '2. Attempt to trigger the action or submit the form.'
+      '1. Initialize form/workflow parameters associated with business rule: "{rule}".',
+      '2. Trigger execution path to evaluate condition: "{rule}".',
+      '3. Verify system enforces business rule behavior and records output state.'
     ],
-    expected: 'The system halts execution, displays high-visibility inline validation warnings, and prevents form submission.'
-  },
-  {
-    id: 'boundary-check',
-    title: 'Verify system boundary checks and graceful error handling',
-    type: 'boundary',
-    enabled: true,
-    caseCount: 1,
-    preconditions: [
-      'Active database connectivity is verified.',
-      'User is on the entry form for "{feature_name}".'
-    ],
-    steps: [
-      '{bounds_steps}',
-      '2. Attempt submission.'
-    ],
-    expected: 'The system handles the boundary ranges gracefully, blocks bad data, and alerts the user with helpful feedback.'
-  },
-  {
-    id: 'security-guard',
-    title: 'Verify input sanitization against SQL Injection and Scripting (XSS) vectors',
-    type: 'security',
-    enabled: true,
-    caseCount: 1,
-    preconditions: [
-      'Security filters and middlewares are active for "{feature_name}".'
-    ],
-    steps: [
-      '1. Insert special script payloads (e.g. <script>alert(1)</script>) and query clauses (e.g. \' OR 1=1 --) into text inputs.',
-      '2. Attempt submission.'
-    ],
-    expected: 'The application sterilizes HTML/SQL special characters, filters the request safely, or handles the inputs as harmless plain text.'
-  },
-  {
-    id: 'concurrency-double-submission',
-    title: 'Verify transaction integrity of {feature_name} under concurrent double-submission',
-    type: 'performance',
-    enabled: true,
-    caseCount: 2,
-    preconditions: [
-      'Subsystem {feature_name} is fully active and loaded.',
-      'Prerequisite state variables from [{dependencies}] are established.',
-      'A valid test subject is available with all required transaction prerequisites satisfied.'
-    ],
-    steps: [
-      '1. Populate all required field values: {required_inputs}.',
-      '2. Prepare two identical requests using the same input payload and transaction context.',
-      '3. Dispatch both requests concurrently within a 50ms execution window.',
-      '4. Repeat the operation using two rapid user-interface submission events.',
-      '5. Capture HTTP responses, transaction identifiers, persistence state, and generated outputs.'
-    ],
-    expected: 'The system processes the transaction at most once. Exactly one request creates or commits the intended state change, while the duplicate request is rejected, deduplicated, serialized, or returned as an idempotent response. The final state contains no duplicate transaction and conforms exactly to {output_names}.'
-  },
-  {
-    id: 'rbac-authorization-enforcement',
-    title: 'Verify role-based authorization enforcement for {feature_name} using unauthorized and authorized roles',
-    type: 'security',
-    enabled: true,
-    caseCount: 2,
-    preconditions: [
-      'Subsystem {feature_name} is deployed and accessible.',
-      'Prerequisite services from [{dependencies}] are available.',
-      'At least one authorized role and one unauthorized role are configured.',
-      'Valid authentication credentials or session contexts exist for each test role.'
-    ],
-    steps: [
-      '1. Populate all required field values: {required_inputs}.',
-      '2. Authenticate using the authorized role and invoke the {feature_id} operation.',
-      '3. Record the response status, response body, and resulting system state.',
-      '4. Authenticate using the unauthorized role and submit the same operation.',
-      '5. Repeat the unauthorized attempt using direct API invocation rather than the user interface.',
-      '6. Compare authorization behavior across all execution paths.'
-    ],
-    expected: 'The authorized role is permitted to execute {feature_name} and receives a response conforming exactly to {output_names}. The unauthorized role is consistently denied with an appropriate authorization error. Direct API access cannot bypass RBAC controls, and no protected state, sensitive output, or partial transaction is exposed to the unauthorized role.'
-  },
-  {
-    id: 'offline-sync-conflict-recovery',
-    title: 'Verify offline-mode synchronization and conflict recovery for {feature_name}',
-    type: 'negative',
-    enabled: true,
-    caseCount: 2,
-    preconditions: [
-      'Subsystem {feature_name} is operational before network disconnection.',
-      'Prerequisite services from [{dependencies}] are synchronized.',
-      'A valid local client state exists and contains all required configuration.',
-      'The client supports offline persistence and deferred synchronization.'
-    ],
-    steps: [
-      '1. Populate all required field values: {required_inputs}.',
-      '2. Disable network connectivity after the client has completed its initial synchronization.',
-      '3. Execute the {feature_id} operation while the client is offline.',
-      '4. Confirm that the operation is stored in the local pending-operation queue.',
-      '5. Modify the same logical entity from another synchronized client or server-side process.',
-      '6. Restore network connectivity and trigger synchronization.',
-      '7. Capture synchronization results, conflict information, retry behavior, and final persisted state.'
-    ],
-    expected: 'Offline operations are retained without data loss and are not falsely reported as permanently synchronized. When connectivity returns, the client retries synchronization safely, detects conflicting server state, and applies the configured conflict-resolution strategy without creating duplicate transactions. The final synchronized state is internally consistent and conforms to {output_names}.'
-  },
-  {
-    id: 'localization-special-character-boundary',
-    title: 'Verify {feature_name} handles localized text, Unicode characters, and special-character boundary conditions',
-    type: 'boundary',
-    enabled: true,
-    caseCount: 2,
-    preconditions: [
-      'Subsystem {feature_name} is active and configured for all supported locales.',
-      'Prerequisite services from [{dependencies}] are available.',
-      'Character encoding is configured for Unicode input and output.',
-      'The test environment can switch between supported localization settings.'
-    ],
-    steps: [
-      '1. Populate all required field values: {required_inputs}.',
-      '2. Replace applicable textual values with supported multilingual characters, including Latin, Chinese, Malay, accented characters, and mixed-language content.',
-      '3. Execute the operation using valid Unicode punctuation, whitespace, symbols, and supported special characters.',
-      '4. Execute {bounds_steps}.',
-      '5. Repeat the operation using characters at the minimum and maximum permitted field lengths.',
-      '6. Include visually similar characters, combining characters, and characters outside the primary test locale where Unicode input is permitted.',
-      '7. Validate the persisted values and returned response under each supported locale.'
-    ],
-    expected: 'All valid localized and Unicode input is accepted, preserved, normalized only where explicitly required, and returned without corruption, truncation, encoding errors, or unexpected character substitution. Values exceeding defined limits are rejected according to the field validation rules. The response structure remains compliant with {output_names} regardless of active locale.'
-  },
-  {
-    id: 'latency-timeout-degradation',
-    title: 'Verify {feature_name} remains resilient during dependency latency degradation and timeout conditions',
-    type: 'performance',
-    enabled: true,
-    caseCount: 2,
-    preconditions: [
-      'Subsystem {feature_name} is deployed and operational.',
-      'Prerequisite services from [{dependencies}] are available for controlled latency injection.',
-      'Configured request, connection, and dependency timeout thresholds are known.',
-      'Monitoring is enabled for request duration, timeout events, retries, and downstream failures.'
-    ],
-    steps: [
-      '1. Populate all required field values: {required_inputs}.',
-      '2. Execute the baseline {feature_id} operation under normal dependency latency.',
-      '3. Introduce controlled latency below the configured timeout threshold and repeat the operation.',
-      '4. Increase dependency latency to exceed the configured timeout threshold.',
-      '5. Repeat the operation using multiple concurrent requests during the degraded period.',
-      '6. Observe retry, circuit-breaker, fallback, cancellation, and resource-release behavior.',
-      '7. Restore normal dependency latency and execute the operation again.',
-      '8. Capture response time, status, timeout behavior, system state, and output payload for every scenario.'
-    ],
-    expected: 'The operation completes normally within the expected latency threshold under healthy conditions. During degradation, requests exceeding configured timeout limits fail deterministically without leaving partial transactions, leaked resources, or indefinite processing. Retry and fallback behavior follows configured policies, excessive retries are prevented, and recovery occurs automatically after dependencies return to normal. Successful responses conform exactly to {output_names}.'
+    expected: 'System correctly evaluates and enforces business rule "{rule}", preserving data integrity and state transition rules.',
+    aiPrompt: 'Include specific edge case validations and boundary conditions associated with this business rule.'
   }
 ];
 
@@ -463,172 +323,157 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
   }
 
   // Programmatic, high-performance code-level test case generator
+  // Handles the MAIN/HEAVY LOAD: Generating exactly 1 detailed test case per input field,
+  // validating all parameters (lengths, datatype, validations, etc.) and reasoning with descriptions.
   public generateCodeLevelTestCases(feature: Feature): TestResult {
     const test_cases: any[] = [];
-    const coverage: string[] = [
-      'Code-level inputs and structural verification',
-      'Security-focused validation guards',
-      'Transaction lifecycle validations',
-      'Boundary boundary conditions checks'
-    ];
+    const coverage: string[] = [];
 
-    const requiredInputs = (feature.input_fields || []).filter(f => f.required);
-    const requiredNames = requiredInputs.map(f => `"${f.name}"`).join(', ');
-    const outputNames = Object.keys(feature.output || {}).map(key => `"${key}"`).join(', ') || 'expected action state';
+    const fields = feature.input_fields || [];
 
-    const boundsInputs = (feature.input_fields || []).filter(f => f.min !== undefined || f.max !== undefined || f.format !== undefined || f.type !== 'string');
-    const boundStepsList = boundsInputs.length > 0
-      ? boundsInputs.map((f, idx) => {
-          const limitsText = [
-            f.min !== undefined ? `min: ${f.min}` : '',
-            f.max !== undefined ? `max: ${f.max}` : '',
-            f.format ? `format: ${f.format}` : ''
-          ].filter(Boolean).join(', ');
-          return `${idx + 1}. Insert out-of-bounds or mismatching type values in "${f.name}" (${f.type}${limitsText ? `, constraints: ${limitsText}` : ''}).`;
-        })
-      : ['1. Input excessively large strings or extreme numerical boundary values into form inputs.'];
-
-    // Select active templates from config or fall back to DEFAULT_BASE_TEMPLATES
-    const activeTemplates = this.config.programmaticTemplates && this.config.programmaticTemplates.length > 0
-      ? this.config.programmaticTemplates
-      : DEFAULT_BASE_TEMPLATES;
-
-    let index = 1;
-    for (const template of activeTemplates) {
-      if (!template.enabled) continue;
-
-      // Skip input-validation if no required inputs are present
-      if (template.id === 'input-validation' && requiredInputs.length === 0) {
-        continue;
-      }
-
-      const count = template.caseCount && template.caseCount > 0 ? template.caseCount : 1;
-
-      for (let cIdx = 0; cIdx < count; cIdx++) {
-        // Compile preconditions
-        let compiledPreconditions: string[] = [];
-        for (const pre of template.preconditions) {
-          if (pre.includes('{dependencies}') && feature.dependencies && feature.dependencies.length > 0) {
-            compiledPreconditions.push(
-              `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`,
-              `Upstream database states established by parent models [${feature.dependencies.join(', ')}] are accessible.`
-            );
-          } else {
-            compiledPreconditions.push(this.compileTemplateValue(pre, feature, requiredNames, outputNames));
-          }
-        }
-
-        // Compile steps
-        let compiledSteps: string[] = [];
-        for (const step of template.steps) {
-          if (step.includes('{bounds_steps}')) {
-            compiledSteps.push(...boundStepsList);
-          } else {
-            compiledSteps.push(this.compileTemplateValue(step, feature, requiredNames, outputNames));
-          }
-        }
-
-        // Compile expected
-        let compiledExpected = this.compileTemplateValue(template.expected, feature, requiredNames, outputNames);
-
-        // Customize the title and contents dynamically depending on the case index to keep them distinct!
-        let customizedTitle = this.compileTemplateValue(template.title, feature, requiredNames, outputNames);
+    if (fields.length === 0) {
+      // Fallback if no fields are defined
+      test_cases.push({
+        id: `TC-${feature.id.toUpperCase()}-NO-FIELDS`,
+        title: `Verify initial configuration and load response of "${feature.name}"`,
+        type: 'positive',
+        preconditions: [
+          feature.dependencies && feature.dependencies.length > 0
+            ? `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`
+            : 'Active user session is verified.',
+          'Subsystem is loaded and fully operational.'
+        ],
+        steps: [
+          `1. Navigate to the "${feature.name}" feature workspace.`,
+          `2. Check that the interface initializes without errors or pending locks.`
+        ],
+        expected: `System loads successfully. Description context: "${feature.description}" is fully compliant.`
+      });
+      coverage.push('Initial load and setup validation');
+    } else {
+      // Loop over each field and generate exactly 1 comprehensive validation test case!
+      fields.forEach((field, fIdx) => {
+        const fieldNameUpper = field.name.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+        const id = `TC-${feature.id.toUpperCase()}-${fieldNameUpper || fIdx + 1}`;
+        const title = `[Field Validation] Comprehensive validation for field "${field.name}"`;
         
-        if (count > 1) {
-          if (template.type === 'positive') {
-            // Happy path sub-scenarios
-            if (cIdx === 0) {
-              customizedTitle = `[Standard Scenario] ${customizedTitle}`;
-            } else if (feature.business_rules && feature.business_rules[cIdx - 1]) {
-              const rule = feature.business_rules[cIdx - 1];
-              customizedTitle = `[Rule Compliance] Verify happy path under rule: "${rule}"`;
-              compiledPreconditions.push(`Precondition check for rule: "${rule}" is satisfied.`);
-              compiledSteps.push(`4. Complete operation while ensuring conformity with the business rule guidelines: "${rule}".`);
-              compiledExpected += ` Verifies compliance with rule: "${rule}".`;
-            } else {
-              customizedTitle = `[Variant ${cIdx + 1}] ${customizedTitle} (Alternate workflow integration)`;
-              compiledSteps.push(`4. Perform the operational flow using alternative non-required fields schema.`);
-            }
-          } else if (template.type === 'negative') {
-            // Negative validation scenarios
-            if (cIdx === 0) {
-              customizedTitle = `[All Fields Empty] ${customizedTitle}`;
-            } else if (requiredInputs[cIdx - 1]) {
-              const targetField = requiredInputs[cIdx - 1];
-              customizedTitle = `[Missing Required Field] Verify form block when leaving "${targetField.name}" blank`;
-              compiledSteps = [
-                `1. Populate all inputs with valid credentials EXCEPT the required "${targetField.name}" field.`,
-                `2. Clear "${targetField.name}" completely.`,
-                `3. Attempt form submission or transaction click.`
-              ];
-              compiledExpected = `Form validation triggers inline warnings indicating that the required "${targetField.name}" field is missing or unpopulated.`;
-            } else {
-              customizedTitle = `[Negative Flow Variant] ${customizedTitle} (Type coercion rejection)`;
-            }
-          } else if (template.type === 'boundary') {
-            // Boundary validation scenarios
-            if (cIdx === 0) {
-              customizedTitle = `[General Limit Ranges] ${customizedTitle}`;
-            } else if (boundsInputs[cIdx - 1]) {
-              const boundedField = boundsInputs[cIdx - 1];
-              customizedTitle = `[Boundary Specific] Verify limit bounds guard on input field "${boundedField.name}"`;
-              const limitDetails = [
-                boundedField.min !== undefined ? `value less than minimum limit: ${boundedField.min}` : '',
-                boundedField.max !== undefined ? `value greater than maximum limit: ${boundedField.max}` : '',
-                boundedField.format ? `mismatching format structure: ${boundedField.format}` : ''
-              ].filter(Boolean).join(' or ');
-              compiledSteps = [
-                `1. Input an out-of-bounds ${limitDetails} in the "${boundedField.name}" field.`,
-                `2. Attempt transaction submission.`
-              ];
-              compiledExpected = `The input parser rejects submission and flags the "${boundedField.name}" field with a high-visibility boundary range alert.`;
-            } else {
-              customizedTitle = `[Limit Out-of-Bounds] ${customizedTitle} (Scenario variation)`;
-            }
-          } else if (template.type === 'security') {
-            if (cIdx === 0) {
-              customizedTitle = `[SQL Injection Guard] ${customizedTitle}`;
-            } else if (cIdx === 1) {
-              customizedTitle = `[XSS Injection Guard] Verify scripts execution is fully sanitized inside textual input blocks`;
-              compiledSteps = [
-                `1. Enter malicious cross-site scripting vectors (e.g. <img src=x onerror=alert(1)> or onload javascript triggers) into text fields.`,
-                `2. Submit request.`
-              ];
-              compiledExpected = `HTML-escaping modules sterilize the tags, rendering the string strictly as harmless plain text data safely.`;
-            } else {
-              customizedTitle = `[Credential Spoofing Guard] Verify authorization token validation checks and session security filters`;
-              compiledSteps = [
-                `1. Formulate a payload with corrupted session cookie headers or forged JWT authorization tokens.`,
-                `2. Send request to the application router.`,
-              ];
-              compiledPreconditions = ['Middlewares and signature authenticators are active.'];
-              compiledExpected = `The application router blocks execution, returns an HTTP 401/403 status, and initiates an audit warning log.`;
-            }
-          } else if (template.type === 'performance') {
-            if (cIdx === 0) {
-              customizedTitle = `[Load Guard] ${customizedTitle}`;
-            } else {
-              customizedTitle = `[Concurrent Spikes] Verify performance and persistence rate-limits under heavy client concurrent requests`;
-              compiledSteps = [
-                `1. Establish continuous parallel transaction request queues.`,
-                `2. Flood the endpoint with high volumes of simultaneous clicks.`
-              ];
-              compiledExpected = `The application server rate-limiter triggers HTTP 429 warnings, keeping the thread pools safe and responsive.`;
-            }
-          }
+        // Build robust preconditions
+        const preconditions: string[] = [
+          feature.dependencies && feature.dependencies.length > 0
+            ? `Dependencies are healthy: ${feature.dependencies.join(', ')} are operational.`
+            : 'User is authenticated with an active form session.',
+          `Target input field "${field.name}" (type: ${field.type}) is rendered and interactable.`
+        ];
+
+        // If description is present, add reasoning about how the system works
+        if (field.description) {
+          preconditions.push(`Field Purpose Reasoning (from description): ${field.description}`);
+        } else {
+          preconditions.push(`Field Purpose Reasoning: Validates data entry for parameter "${field.name}".`);
         }
+
+        // Build exhaustive steps to check datatype, lengths, empty values, and validation rules
+        const steps: string[] = [
+          `1. Focus the input field "${field.name}" inside the "${feature.name}" workspace.`
+        ];
+
+        // Required check
+        if (field.required) {
+          steps.push(`2. Requiredness Check: Leave "${field.name}" completely blank and attempt validation or submit. Expected: Submission blocks, highlighting "${field.name}" as mandatory.`);
+        } else {
+          steps.push(`2. Optionality Check: Leave "${field.name}" blank and submit. Expected: System accepts empty input without warning.`);
+        }
+
+        // Data type check
+        let wrongTypeSample = 'invalid_text';
+        if (field.type === 'number') {
+          wrongTypeSample = '"not-a-number" text';
+        } else if (field.type === 'boolean') {
+          wrongTypeSample = '"some_string" instead of true/false';
+        } else if (field.type === 'array') {
+          wrongTypeSample = 'a scalar string';
+        } else if (field.type === 'object') {
+          wrongTypeSample = 'primitive string';
+        }
+        steps.push(`3. Data Type Compliance: Type mismatch trial by sending ${wrongTypeSample} to "${field.name}". Expected: Rejects value or forces conversion to conform with data type "${field.type}".`);
+
+        // Length/Range boundary checks
+        if (field.type === 'string') {
+          const minVal = field.min !== undefined ? field.min : 1;
+          const maxVal = field.max !== undefined ? field.max : 255;
+          steps.push(`4. Length Boundary Validation: Write text string of length ${minVal - 1} (below min length constraint of ${minVal}) and length ${maxVal + 1} (above max length constraint of ${maxVal}). Expected: Validation alerts trigger, blocking the inputs.`);
+          steps.push(`5. Length Acceptance Verification: Write a compliant string of length exactly ${minVal} and length ${maxVal}. Expected: Successfully verified and accepted.`);
+        } else if (field.type === 'number') {
+          const minVal = field.min !== undefined ? field.min : 0;
+          const maxVal = field.max !== undefined ? field.max : 999999;
+          steps.push(`4. Value Boundary Range Validation: Enter numeric value ${minVal - 1} (below min constraint of ${minVal}) and numeric value ${maxVal + 1} (above max constraint of ${maxVal}). Expected: Rejection warnings block submission.`);
+          steps.push(`5. Value Acceptance Verification: Input compliant boundary values (exactly ${minVal} and ${maxVal}). Expected: Accepted by numerical engine.`);
+        } else {
+          steps.push(`4. General bounds verification check: Validate elements with respect to limits, sizes, and formats.`);
+        }
+
+        // Custom validation check
+        if (field.validation) {
+          steps.push(`6. Custom Constraint Compliance: Attempt inputs that violate specified validation rules "${field.validation}". Expected: System blocks submission and displays specific validation warnings.`);
+        }
+
+        // Use field description for user logic reasoning step
+        if (field.description) {
+          steps.push(`7. Logical Intent Reasoning: Check functional behavior based on described purpose ("${field.description}") to ensure business operations map accurately.`);
+        }
+
+        // Expected output details
+        const expected = `The system successfully enforces all constraints on input parameter "${field.name}". It blocks empty states if required, restricts inputs based on type "${field.type}" and size limits, applies standard rule validations${field.validation ? ` ("${field.validation}")` : ''}, and matches the logical design expectations outlined in the field description.`;
 
         test_cases.push({
-          id: `TC-${feature.id.toUpperCase()}-${String(index).padStart(3, '0')}`,
-          title: customizedTitle,
-          type: template.type,
-          preconditions: compiledPreconditions,
-          steps: compiledSteps,
-          expected: compiledExpected
+          id,
+          title,
+          type: field.required ? 'negative' : 'boundary',
+          preconditions,
+          steps,
+          expected
         });
 
-        index++;
-      }
+        coverage.push(`Input field "${field.name}" comprehensive specifications validation`);
+      });
+    }
+
+    // Generate 1 test case per business rule defined in feature specifications!
+    const rules = feature.business_rules || [];
+    if (rules.length > 0) {
+      const outputNamesStr = Object.keys(feature.output || {}).join(', ') || 'expected system outputs';
+      rules.forEach((rule, rIdx) => {
+        const id = `TC-${feature.id.toUpperCase()}-RULE-${rIdx + 1}`;
+        const title = `[Business Rule] Verify compliance for rule: "${rule}"`;
+        
+        const preconditions: string[] = [
+          feature.dependencies && feature.dependencies.length > 0
+            ? `Dependencies are operational: ${feature.dependencies.join(', ')} must be in a ready state.`
+            : 'Active user session and feature workspace are loaded.',
+          `Rule Context: "${rule}"`,
+          `System Assumptions: ${feature.assumptions || 'Default environment conditions apply.'}`
+        ];
+
+        const steps: string[] = [
+          `1. Initialize the "${feature.name}" workspace transaction.`,
+          `2. Formulate input values specifically to evaluate business rule: "${rule}".`,
+          `3. Trigger execution path and observe rule processing.`,
+          `4. Inspect output fields [${outputNamesStr}] and verify state persistence.`
+        ];
+
+        const expected = `The application strictly enforces business rule: "${rule}". State transitions and output contracts [${outputNamesStr}] complete as expected without specification violations.`;
+
+        test_cases.push({
+          id,
+          title,
+          type: 'business_rule',
+          preconditions,
+          steps,
+          expected
+        });
+
+        coverage.push(`Business rule #${rIdx + 1} ("${rule}") unit test validation`);
+      });
     }
 
     return { test_cases, coverage };
@@ -687,6 +532,18 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
       ? `\n### Upstream Module Dependencies to assume:\n${feature.dependencies.map(dep => `- Prerequisite completed state established by parent module "${dep}" must be verified.`).join('\n')}`
       : '';
 
+    const inputsContext = feature.input_fields && feature.input_fields.length > 0
+      ? `\n### Form Inputs & Validation Criteria:\n${feature.input_fields.map(f => `- \`${f.name}\` (type: ${f.type}${f.required ? ', required: true' : ''}${f.description ? `, description: "${f.description}"` : ''}${f.validation ? `, validation constraints: "${f.validation}"` : ''})`).join('\n')}`
+      : '';
+
+    const assumptionsContext = feature.assumptions
+      ? `\n### Assumptions & Preconditions:\n${feature.assumptions}`
+      : '';
+
+    const referenceContext = feature.reference
+      ? `\n### External References / System Maps:\n${feature.reference}`
+      : '';
+
     // Get active programmatic template titles so AI doesn't duplicate them
     const activeTemplates = this.config.programmaticTemplates && this.config.programmaticTemplates.length > 0
       ? this.config.programmaticTemplates
@@ -696,14 +553,24 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
       .map(t => `- ${t.title.replace(/{feature_name}/g, feature.name)}`)
       .join('\n');
 
+    // Extract custom AI prompt directives from baseline templates
+    const activeAiPrompts = activeTemplates
+      .filter(t => t.enabled && t.aiPrompt && t.aiPrompt.trim() !== '')
+      .map(t => `- Template "${t.title.replace(/{feature_name}/g, feature.name)}": ${t.aiPrompt}`)
+      .join('\n');
+
+    const aiPromptContext = activeAiPrompts
+      ? `\n### Baseline AI Prompt Guidance (Special Scenario Directives):\n${activeAiPrompts}\n*Special Requirement*: Ensure the generated test cases incorporate the special scenario directives specified in the baseline templates above.\n`
+      : '';
+
     return `
 Please generate exactly ${limit} highly specialized, advanced test cases that target the unique business rules or custom user specifications of this feature.
 
 The following test scenario types are already covered programmatically at the code level. Do NOT generate duplicates of these:
 ${activeProgrammaticTitles || '- Standard basic checks'}
-
+${aiPromptContext}
 ### Feature: ${feature.name}
-### Description: ${feature.description}${depsContext}
+### Description: ${feature.description}${depsContext}${inputsContext}${assumptionsContext}${referenceContext}
 
 ### Business Rules to cover:
 ${feature.business_rules.map((rule, idx) => `${idx + 1}. ${rule}`).join('\n')}
