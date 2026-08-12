@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { AIConfig, BaseCaseTemplate } from '../types';
 import { LLMClient, DEFAULT_BASE_TEMPLATES } from '../services/llm';
 import { 
   Database, RotateCcw, Trash2, Edit3, Save, Plus, X, 
-  HelpCircle, Check, Sparkles, LayoutGrid, CheckCircle2 
+  HelpCircle, Check, Sparkles, LayoutGrid, CheckCircle2,
+  Upload, Download
 } from 'lucide-react';
 
 interface TemplatesManagerProps {
@@ -26,6 +27,89 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
   const [editSteps, setEditSteps] = useState('');
   const [editExpected, setEditExpected] = useState('');
   const [editCaseCount, setEditCaseCount] = useState<number>(1);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Export single template as JSON
+  const handleExportTemplate = (template: BaseCaseTemplate) => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(template, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    const sanitizedId = template.id.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    downloadAnchor.setAttribute("download", `baseline-${sanitizedId}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Export all templates as JSON archive
+  const handleExportAllTemplates = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(templates, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `all-baseline-templates.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Import templates from a file upload
+  const handleImportTemplates = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const fileContent = event.target?.result as string;
+        const parsed = JSON.parse(fileContent);
+
+        let importedTemplates: BaseCaseTemplate[] = [];
+        if (Array.isArray(parsed)) {
+          importedTemplates = parsed.map(t => ({
+            ...t,
+            id: t.id || `custom-imported-${Date.now()}-${Math.random()}`,
+            enabled: t.enabled !== undefined ? t.enabled : true,
+            caseCount: t.caseCount || 1,
+            preconditions: Array.isArray(t.preconditions) ? t.preconditions : [],
+            steps: Array.isArray(t.steps) ? t.steps : [],
+            expected: t.expected || 'Outcome expectation specified'
+          }));
+        } else if (parsed && typeof parsed === 'object' && parsed.title) {
+          importedTemplates = [{
+            ...parsed,
+            id: parsed.id || `custom-imported-${Date.now()}`,
+            enabled: parsed.enabled !== undefined ? parsed.enabled : true,
+            caseCount: parsed.caseCount || 1,
+            preconditions: Array.isArray(parsed.preconditions) ? parsed.preconditions : [],
+            steps: Array.isArray(parsed.steps) ? parsed.steps : [],
+            expected: parsed.expected || 'Outcome expectation specified'
+          }];
+        } else {
+          throw new Error('Invalid template schema. JSON must be a single template object with a "title" field or an array of templates.');
+        }
+
+        const updated = [...templates];
+        importedTemplates.forEach(imported => {
+          const index = updated.findIndex(existing => existing.id === imported.id);
+          if (index !== -1) {
+            updated[index] = imported;
+          } else {
+            updated.push(imported);
+          }
+        });
+
+        setTemplates(updated);
+        saveConfig(updated);
+        alert(`Successfully imported ${importedTemplates.length} baseline template(s).`);
+      } catch (err: any) {
+        alert(`Failed to parse baseline templates JSON: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Clear file element
+  };
 
   const saveConfig = (updatedTemplates: BaseCaseTemplate[]) => {
     const newConfig = { ...config, programmaticTemplates: updatedTemplates };
@@ -117,14 +201,44 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleResetTemplates}
-          className="inline-flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-350 text-slate-700 hover:text-slate-900 text-xs font-bold rounded-xl transition shadow-sm"
-        >
-          <RotateCcw className="w-4 h-4 mr-1.5" />
-          Factory Reset Baseline
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Hidden Import file input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImportTemplates}
+            accept=".json"
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition shadow-xs"
+            title="Import Baseline Templates JSON"
+          >
+            <Upload className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+            Import File
+          </button>
+          
+          <button
+            type="button"
+            onClick={handleExportAllTemplates}
+            className="inline-flex items-center px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition shadow-xs"
+            title="Export all baseline templates"
+          >
+            <Download className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+            Export Archive
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetTemplates}
+            className="inline-flex items-center px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-350 text-slate-700 hover:text-slate-900 text-xs font-bold rounded-xl transition shadow-sm"
+          >
+            <RotateCcw className="w-4 h-4 mr-1.5" />
+            Factory Reset
+          </button>
+        </div>
       </div>
 
       {/* Placeholders Cheat Sheet */}
@@ -203,6 +317,15 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                 {/* Actions */}
                 {!isEditing && (
                   <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => handleExportTemplate(template)}
+                      className="inline-flex items-center px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition"
+                      title="Export single template as JSON"
+                    >
+                      <Download className="w-3.5 h-3.5 mr-1 text-slate-500" />
+                      Export
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleStartEdit(template)}

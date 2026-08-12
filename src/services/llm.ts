@@ -64,6 +64,118 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
       '2. Attempt submission.'
     ],
     expected: 'The application sterilizes HTML/SQL special characters, filters the request safely, or handles the inputs as harmless plain text.'
+  },
+  {
+    id: 'concurrency-double-submission',
+    title: 'Verify transaction integrity of {feature_name} under concurrent double-submission',
+    type: 'performance',
+    enabled: true,
+    caseCount: 2,
+    preconditions: [
+      'Subsystem {feature_name} is fully active and loaded.',
+      'Prerequisite state variables from [{dependencies}] are established.',
+      'A valid test subject is available with all required transaction prerequisites satisfied.'
+    ],
+    steps: [
+      '1. Populate all required field values: {required_inputs}.',
+      '2. Prepare two identical requests using the same input payload and transaction context.',
+      '3. Dispatch both requests concurrently within a 50ms execution window.',
+      '4. Repeat the operation using two rapid user-interface submission events.',
+      '5. Capture HTTP responses, transaction identifiers, persistence state, and generated outputs.'
+    ],
+    expected: 'The system processes the transaction at most once. Exactly one request creates or commits the intended state change, while the duplicate request is rejected, deduplicated, serialized, or returned as an idempotent response. The final state contains no duplicate transaction and conforms exactly to {output_names}.'
+  },
+  {
+    id: 'rbac-authorization-enforcement',
+    title: 'Verify role-based authorization enforcement for {feature_name} using unauthorized and authorized roles',
+    type: 'security',
+    enabled: true,
+    caseCount: 2,
+    preconditions: [
+      'Subsystem {feature_name} is deployed and accessible.',
+      'Prerequisite services from [{dependencies}] are available.',
+      'At least one authorized role and one unauthorized role are configured.',
+      'Valid authentication credentials or session contexts exist for each test role.'
+    ],
+    steps: [
+      '1. Populate all required field values: {required_inputs}.',
+      '2. Authenticate using the authorized role and invoke the {feature_id} operation.',
+      '3. Record the response status, response body, and resulting system state.',
+      '4. Authenticate using the unauthorized role and submit the same operation.',
+      '5. Repeat the unauthorized attempt using direct API invocation rather than the user interface.',
+      '6. Compare authorization behavior across all execution paths.'
+    ],
+    expected: 'The authorized role is permitted to execute {feature_name} and receives a response conforming exactly to {output_names}. The unauthorized role is consistently denied with an appropriate authorization error. Direct API access cannot bypass RBAC controls, and no protected state, sensitive output, or partial transaction is exposed to the unauthorized role.'
+  },
+  {
+    id: 'offline-sync-conflict-recovery',
+    title: 'Verify offline-mode synchronization and conflict recovery for {feature_name}',
+    type: 'negative',
+    enabled: true,
+    caseCount: 2,
+    preconditions: [
+      'Subsystem {feature_name} is operational before network disconnection.',
+      'Prerequisite services from [{dependencies}] are synchronized.',
+      'A valid local client state exists and contains all required configuration.',
+      'The client supports offline persistence and deferred synchronization.'
+    ],
+    steps: [
+      '1. Populate all required field values: {required_inputs}.',
+      '2. Disable network connectivity after the client has completed its initial synchronization.',
+      '3. Execute the {feature_id} operation while the client is offline.',
+      '4. Confirm that the operation is stored in the local pending-operation queue.',
+      '5. Modify the same logical entity from another synchronized client or server-side process.',
+      '6. Restore network connectivity and trigger synchronization.',
+      '7. Capture synchronization results, conflict information, retry behavior, and final persisted state.'
+    ],
+    expected: 'Offline operations are retained without data loss and are not falsely reported as permanently synchronized. When connectivity returns, the client retries synchronization safely, detects conflicting server state, and applies the configured conflict-resolution strategy without creating duplicate transactions. The final synchronized state is internally consistent and conforms to {output_names}.'
+  },
+  {
+    id: 'localization-special-character-boundary',
+    title: 'Verify {feature_name} handles localized text, Unicode characters, and special-character boundary conditions',
+    type: 'boundary',
+    enabled: true,
+    caseCount: 2,
+    preconditions: [
+      'Subsystem {feature_name} is active and configured for all supported locales.',
+      'Prerequisite services from [{dependencies}] are available.',
+      'Character encoding is configured for Unicode input and output.',
+      'The test environment can switch between supported localization settings.'
+    ],
+    steps: [
+      '1. Populate all required field values: {required_inputs}.',
+      '2. Replace applicable textual values with supported multilingual characters, including Latin, Chinese, Malay, accented characters, and mixed-language content.',
+      '3. Execute the operation using valid Unicode punctuation, whitespace, symbols, and supported special characters.',
+      '4. Execute {bounds_steps}.',
+      '5. Repeat the operation using characters at the minimum and maximum permitted field lengths.',
+      '6. Include visually similar characters, combining characters, and characters outside the primary test locale where Unicode input is permitted.',
+      '7. Validate the persisted values and returned response under each supported locale.'
+    ],
+    expected: 'All valid localized and Unicode input is accepted, preserved, normalized only where explicitly required, and returned without corruption, truncation, encoding errors, or unexpected character substitution. Values exceeding defined limits are rejected according to the field validation rules. The response structure remains compliant with {output_names} regardless of active locale.'
+  },
+  {
+    id: 'latency-timeout-degradation',
+    title: 'Verify {feature_name} remains resilient during dependency latency degradation and timeout conditions',
+    type: 'performance',
+    enabled: true,
+    caseCount: 2,
+    preconditions: [
+      'Subsystem {feature_name} is deployed and operational.',
+      'Prerequisite services from [{dependencies}] are available for controlled latency injection.',
+      'Configured request, connection, and dependency timeout thresholds are known.',
+      'Monitoring is enabled for request duration, timeout events, retries, and downstream failures.'
+    ],
+    steps: [
+      '1. Populate all required field values: {required_inputs}.',
+      '2. Execute the baseline {feature_id} operation under normal dependency latency.',
+      '3. Introduce controlled latency below the configured timeout threshold and repeat the operation.',
+      '4. Increase dependency latency to exceed the configured timeout threshold.',
+      '5. Repeat the operation using multiple concurrent requests during the degraded period.',
+      '6. Observe retry, circuit-breaker, fallback, cancellation, and resource-release behavior.',
+      '7. Restore normal dependency latency and execute the operation again.',
+      '8. Capture response time, status, timeout behavior, system state, and output payload for every scenario.'
+    ],
+    expected: 'The operation completes normally within the expected latency threshold under healthy conditions. During degradation, requests exceeding configured timeout limits fail deterministically without leaving partial transactions, leaked resources, or indefinite processing. Retry and fallback behavior follows configured policies, excessive retries are prevented, and recovery occurs automatically after dependencies return to normal. Successful responses conform exactly to {output_names}.'
   }
 ];
 
