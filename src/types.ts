@@ -48,6 +48,7 @@ export interface BaseCaseTemplate {
   preconditions: string[];
   steps: string[];
   expected: string;
+  caseCount?: number;
 }
 
 export interface AIConfig {

@@ -6,6 +6,7 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     title: 'Verify happy-path execution of "{feature_name}" with fully compliant inputs',
     type: 'positive',
     enabled: true,
+    caseCount: 2,
     preconditions: [
       '{dependencies}',
       'Subsystem "{feature_name}" is loaded and fully responsive.'
@@ -22,6 +23,7 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     title: 'Verify input validation locks when required fields are left blank',
     type: 'negative',
     enabled: true,
+    caseCount: 1,
     preconditions: [
       'Subsystem "{feature_name}" is loaded.',
       'User is viewing the input form fields.'
@@ -37,6 +39,7 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     title: 'Verify system boundary checks and graceful error handling',
     type: 'boundary',
     enabled: true,
+    caseCount: 1,
     preconditions: [
       'Active database connectivity is verified.',
       'User is on the entry form for "{feature_name}".'
@@ -52,6 +55,7 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     title: 'Verify input sanitization against SQL Injection and Scripting (XSS) vectors',
     type: 'security',
     enabled: true,
+    caseCount: 1,
     preconditions: [
       'Security filters and middlewares are active for "{feature_name}".'
     ],
@@ -386,43 +390,133 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
         continue;
       }
 
-      // Compile preconditions
-      const compiledPreconditions: string[] = [];
-      for (const pre of template.preconditions) {
-        if (pre.includes('{dependencies}') && feature.dependencies && feature.dependencies.length > 0) {
-          // Add detailed dependencies preconditions
-          compiledPreconditions.push(
-            `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`,
-            `Upstream database states established by parent models [${feature.dependencies.join(', ')}] are accessible.`
-          );
-        } else {
-          compiledPreconditions.push(this.compileTemplateValue(pre, feature, requiredNames, outputNames));
+      const count = template.caseCount && template.caseCount > 0 ? template.caseCount : 1;
+
+      for (let cIdx = 0; cIdx < count; cIdx++) {
+        // Compile preconditions
+        let compiledPreconditions: string[] = [];
+        for (const pre of template.preconditions) {
+          if (pre.includes('{dependencies}') && feature.dependencies && feature.dependencies.length > 0) {
+            compiledPreconditions.push(
+              `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`,
+              `Upstream database states established by parent models [${feature.dependencies.join(', ')}] are accessible.`
+            );
+          } else {
+            compiledPreconditions.push(this.compileTemplateValue(pre, feature, requiredNames, outputNames));
+          }
         }
-      }
 
-      // Compile steps
-      const compiledSteps: string[] = [];
-      for (const step of template.steps) {
-        if (step.includes('{bounds_steps}')) {
-          compiledSteps.push(...boundStepsList);
-        } else {
-          compiledSteps.push(this.compileTemplateValue(step, feature, requiredNames, outputNames));
+        // Compile steps
+        let compiledSteps: string[] = [];
+        for (const step of template.steps) {
+          if (step.includes('{bounds_steps}')) {
+            compiledSteps.push(...boundStepsList);
+          } else {
+            compiledSteps.push(this.compileTemplateValue(step, feature, requiredNames, outputNames));
+          }
         }
+
+        // Compile expected
+        let compiledExpected = this.compileTemplateValue(template.expected, feature, requiredNames, outputNames);
+
+        // Customize the title and contents dynamically depending on the case index to keep them distinct!
+        let customizedTitle = this.compileTemplateValue(template.title, feature, requiredNames, outputNames);
+        
+        if (count > 1) {
+          if (template.type === 'positive') {
+            // Happy path sub-scenarios
+            if (cIdx === 0) {
+              customizedTitle = `[Standard Scenario] ${customizedTitle}`;
+            } else if (feature.business_rules && feature.business_rules[cIdx - 1]) {
+              const rule = feature.business_rules[cIdx - 1];
+              customizedTitle = `[Rule Compliance] Verify happy path under rule: "${rule}"`;
+              compiledPreconditions.push(`Precondition check for rule: "${rule}" is satisfied.`);
+              compiledSteps.push(`4. Complete operation while ensuring conformity with the business rule guidelines: "${rule}".`);
+              compiledExpected += ` Verifies compliance with rule: "${rule}".`;
+            } else {
+              customizedTitle = `[Variant ${cIdx + 1}] ${customizedTitle} (Alternate workflow integration)`;
+              compiledSteps.push(`4. Perform the operational flow using alternative non-required fields schema.`);
+            }
+          } else if (template.type === 'negative') {
+            // Negative validation scenarios
+            if (cIdx === 0) {
+              customizedTitle = `[All Fields Empty] ${customizedTitle}`;
+            } else if (requiredInputs[cIdx - 1]) {
+              const targetField = requiredInputs[cIdx - 1];
+              customizedTitle = `[Missing Required Field] Verify form block when leaving "${targetField.name}" blank`;
+              compiledSteps = [
+                `1. Populate all inputs with valid credentials EXCEPT the required "${targetField.name}" field.`,
+                `2. Clear "${targetField.name}" completely.`,
+                `3. Attempt form submission or transaction click.`
+              ];
+              compiledExpected = `Form validation triggers inline warnings indicating that the required "${targetField.name}" field is missing or unpopulated.`;
+            } else {
+              customizedTitle = `[Negative Flow Variant] ${customizedTitle} (Type coercion rejection)`;
+            }
+          } else if (template.type === 'boundary') {
+            // Boundary validation scenarios
+            if (cIdx === 0) {
+              customizedTitle = `[General Limit Ranges] ${customizedTitle}`;
+            } else if (boundsInputs[cIdx - 1]) {
+              const boundedField = boundsInputs[cIdx - 1];
+              customizedTitle = `[Boundary Specific] Verify limit bounds guard on input field "${boundedField.name}"`;
+              const limitDetails = [
+                boundedField.min !== undefined ? `value less than minimum limit: ${boundedField.min}` : '',
+                boundedField.max !== undefined ? `value greater than maximum limit: ${boundedField.max}` : '',
+                boundedField.format ? `mismatching format structure: ${boundedField.format}` : ''
+              ].filter(Boolean).join(' or ');
+              compiledSteps = [
+                `1. Input an out-of-bounds ${limitDetails} in the "${boundedField.name}" field.`,
+                `2. Attempt transaction submission.`
+              ];
+              compiledExpected = `The input parser rejects submission and flags the "${boundedField.name}" field with a high-visibility boundary range alert.`;
+            } else {
+              customizedTitle = `[Limit Out-of-Bounds] ${customizedTitle} (Scenario variation)`;
+            }
+          } else if (template.type === 'security') {
+            if (cIdx === 0) {
+              customizedTitle = `[SQL Injection Guard] ${customizedTitle}`;
+            } else if (cIdx === 1) {
+              customizedTitle = `[XSS Injection Guard] Verify scripts execution is fully sanitized inside textual input blocks`;
+              compiledSteps = [
+                `1. Enter malicious cross-site scripting vectors (e.g. <img src=x onerror=alert(1)> or onload javascript triggers) into text fields.`,
+                `2. Submit request.`
+              ];
+              compiledExpected = `HTML-escaping modules sterilize the tags, rendering the string strictly as harmless plain text data safely.`;
+            } else {
+              customizedTitle = `[Credential Spoofing Guard] Verify authorization token validation checks and session security filters`;
+              compiledSteps = [
+                `1. Formulate a payload with corrupted session cookie headers or forged JWT authorization tokens.`,
+                `2. Send request to the application router.`,
+              ];
+              compiledPreconditions = ['Middlewares and signature authenticators are active.'];
+              compiledExpected = `The application router blocks execution, returns an HTTP 401/403 status, and initiates an audit warning log.`;
+            }
+          } else if (template.type === 'performance') {
+            if (cIdx === 0) {
+              customizedTitle = `[Load Guard] ${customizedTitle}`;
+            } else {
+              customizedTitle = `[Concurrent Spikes] Verify performance and persistence rate-limits under heavy client concurrent requests`;
+              compiledSteps = [
+                `1. Establish continuous parallel transaction request queues.`,
+                `2. Flood the endpoint with high volumes of simultaneous clicks.`
+              ];
+              compiledExpected = `The application server rate-limiter triggers HTTP 429 warnings, keeping the thread pools safe and responsive.`;
+            }
+          }
+        }
+
+        test_cases.push({
+          id: `TC-${feature.id.toUpperCase()}-${String(index).padStart(3, '0')}`,
+          title: customizedTitle,
+          type: template.type,
+          preconditions: compiledPreconditions,
+          steps: compiledSteps,
+          expected: compiledExpected
+        });
+
+        index++;
       }
-
-      // Compile expected
-      const compiledExpected = this.compileTemplateValue(template.expected, feature, requiredNames, outputNames);
-
-      test_cases.push({
-        id: `TC-${feature.id.toUpperCase()}-${String(index).padStart(3, '0')}`,
-        title: this.compileTemplateValue(template.title, feature, requiredNames, outputNames),
-        type: template.type,
-        preconditions: compiledPreconditions,
-        steps: compiledSteps,
-        expected: compiledExpected
-      });
-
-      index++;
     }
 
     return { test_cases, coverage };

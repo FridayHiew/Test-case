@@ -25,6 +25,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
   const [editPreconditions, setEditPreconditions] = useState('');
   const [editSteps, setEditSteps] = useState('');
   const [editExpected, setEditExpected] = useState('');
+  const [editCaseCount, setEditCaseCount] = useState<number>(1);
 
   const saveConfig = (updatedTemplates: BaseCaseTemplate[]) => {
     const newConfig = { ...config, programmaticTemplates: updatedTemplates };
@@ -45,6 +46,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
     setEditPreconditions(template.preconditions.join('\n'));
     setEditSteps(template.steps.join('\n'));
     setEditExpected(template.expected);
+    setEditCaseCount(template.caseCount || 1);
   };
 
   const handleSaveEdit = (id: string) => {
@@ -56,7 +58,8 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
           type: editType,
           preconditions: editPreconditions.split('\n').map(l => l.trim()).filter(Boolean),
           steps: editSteps.split('\n').map(l => l.trim()).filter(Boolean),
-          expected: editExpected
+          expected: editExpected,
+          caseCount: editCaseCount
         };
       }
       return t;
@@ -79,6 +82,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
       title: 'Verify custom baseline behavior of "{feature_name}"',
       type: 'positive',
       enabled: true,
+      caseCount: 1,
       preconditions: ['Subsystem "{feature_name}" is active.'],
       steps: ['1. Trigger the main workspace handler.', '2. Inspect the result state.'],
       expected: 'Outputs are generated correctly.'
@@ -108,15 +112,15 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
             </div>
             <h2 className="text-lg font-semibold text-slate-900">Baseline Case Structure Templates</h2>
           </div>
-          <p className="text-xs text-slate-500 max-w-xl leading-relaxed">
-            Configure the programmatic base test cases compiled instantly in-browser. This ensures key validation paths run at 0ms latency without consuming model tokens or hitting offline request limits.
+          <p className="text-xs sm:text-sm text-slate-500 leading-relaxed max-w-2xl">
+            Configure code-level test cases that generate programmatically. Adjust the <strong>Cases Count</strong> slider on each template to create multiple distinct branch variations per category.
           </p>
         </div>
 
         <button
           type="button"
           onClick={handleResetTemplates}
-          className="inline-flex items-center text-xs font-semibold text-rose-600 hover:text-rose-800 transition py-2 px-3.5 bg-rose-50 border border-rose-100 hover:border-rose-200 rounded-lg"
+          className="inline-flex items-center px-4 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-350 text-slate-700 hover:text-slate-900 text-xs font-bold rounded-xl transition shadow-sm"
         >
           <RotateCcw className="w-4 h-4 mr-1.5" />
           Factory Reset Baseline
@@ -179,7 +183,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                     className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded cursor-pointer"
                     title={template.enabled ? 'Disable Template' : 'Enable Template'}
                   />
-                  <div className="flex items-center space-x-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
                       template.type === 'positive' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
                       template.type === 'negative' ? 'bg-rose-50 text-rose-700 border border-rose-100' :
@@ -188,6 +192,9 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                       'bg-slate-100 text-slate-700'
                     }`}>
                       {template.type}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                      Generates {template.caseCount || 1} { (template.caseCount || 1) === 1 ? 'case' : 'cases' }
                     </span>
                     <span className="font-mono text-[10px] text-slate-400 font-bold">[{template.id}]</span>
                   </div>
@@ -230,13 +237,13 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5 tracking-wider">Test Type Category</label>
                       <select
                         value={editType}
                         onChange={(e) => setEditType(e.target.value as any)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none font-semibold text-slate-700"
                       >
                         <option value="positive">Positive (Happy Path)</option>
                         <option value="negative">Negative (Error Handling)</option>
@@ -244,6 +251,28 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                         <option value="security">Security (Injection Guard)</option>
                         <option value="performance">Performance (Load Guard)</option>
                       </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5 tracking-wider">
+                        Programmatic Cases Count To Generate: <span className="text-blue-600 font-extrabold">{editCaseCount}</span>
+                      </label>
+                      <div className="flex items-center space-x-3 pt-1">
+                        <input
+                          type="range"
+                          min="1"
+                          max="5"
+                          value={editCaseCount}
+                          onChange={(e) => setEditCaseCount(parseInt(e.target.value, 10))}
+                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        />
+                        <span className="font-mono text-xs font-bold text-slate-700 bg-slate-200 py-1 px-2.5 rounded-md min-w-[32px] text-center">
+                          {editCaseCount}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Increase to automatically branch positive rules or compile field-specific validations.
+                      </p>
                     </div>
                   </div>
 
