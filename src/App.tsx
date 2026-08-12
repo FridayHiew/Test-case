@@ -9,9 +9,10 @@ import CacheManager from './components/CacheManager';
 import SettingsPanel from './components/SettingsPanel';
 import SrsProcessor from './components/SrsProcessor';
 import PwaPrompt from './components/PwaPrompt';
+import E2EJourneyManager from './components/E2EJourneyManager';
 import { 
   Sparkles, Folder, Database, Settings, Cpu, Cloud, 
-  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle, FileText, LayoutGrid
+  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle, FileText, LayoutGrid, GitFork
 } from 'lucide-react';
 
 const DEFAULT_CONFIG: AIConfig = {
@@ -28,7 +29,7 @@ const DEFAULT_CONFIG: AIConfig = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'generator' | 'srs' | 'manager' | 'templates' | 'cache' | 'settings'>('generator');
+  const [activeTab, setActiveTab] = useState<'generator' | 'srs' | 'manager' | 'templates' | 'cache' | 'settings' | 'e2e'>('generator');
   const [features, setFeatures] = useState<Feature[]>([]);
   const [selectedFeatureId, setSelectedFeatureId] = useState<string>('');
   const [cacheCount, setCacheCount] = useState<number>(0);
@@ -257,6 +258,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('e2e')}
+            className={`flex items-center justify-center space-x-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+              activeTab === 'e2e'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            }`}
+          >
+            <GitFork className="w-4 h-4 shrink-0" />
+            <span>E2E Journeys</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('cache')}
             className={`flex items-center justify-center space-x-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
               activeTab === 'cache'
@@ -318,6 +331,15 @@ export default function App() {
               config={config}
               onConfigChange={handleConfigChange}
               llmClient={llmClient}
+            />
+          )}
+
+          {activeTab === 'e2e' && (
+            <E2EJourneyManager
+              config={config}
+              llmClient={llmClient}
+              features={features}
+              active={activeTab === 'e2e'}
             />
           )}
 

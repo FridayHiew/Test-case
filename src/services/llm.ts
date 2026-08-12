@@ -1,4 +1,4 @@
-import { AIConfig, Feature, TestResult, BaseCaseTemplate } from '../types';
+import { AIConfig, Feature, TestResult, BaseCaseTemplate, E2ETestCase } from '../types';
 
 export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
   {
@@ -902,6 +902,35 @@ This is a known compatibility issue between certain GPU/graphics driver configur
     }
 
     return result;
+  }
+
+  // Generate E2E Test Cases from a Mermaid Flowchart using Gemini
+  async generateE2E(name: string, description: string, mermaidFlowchart: string, features: Feature[]): Promise<E2ETestCase[]> {
+    try {
+      const response = await fetch('/api/generate-e2e', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name,
+          description,
+          mermaidFlowchart,
+          features,
+          temperature: this.config.temperature
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Server E2E generation request failed');
+      }
+
+      return data.data.test_cases || [];
+    } catch (err: any) {
+      console.error('Failed to generate smart E2E cases:', err);
+      throw new Error(`E2E flow analysis failed: ${err.message}`);
+    }
   }
 }
 

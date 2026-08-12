@@ -51,6 +51,23 @@ export interface BaseCaseTemplate {
   caseCount?: number;
 }
 
+export interface E2ETestCase {
+  id: string;
+  name: string;
+  flowPath: string; // e.g., "LOGIN-001 -> CART-001 -> PAYMENT-001"
+  preconditions: string[];
+  steps: string[];
+  expected: string;
+}
+
+export interface E2EJourney {
+  id: string;
+  name: string;
+  description: string;
+  mermaidFlowchart: string;
+  testCases?: E2ETestCase[];
+}
+
 export interface AIConfig {
   aiMode: 'offline' | 'online' | 'webllm';
   // Offline Ollama Config

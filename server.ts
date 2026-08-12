@@ -116,6 +116,95 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
+// API: Generate E2E Test Cases from Mermaid Flowchart
+app.post('/api/generate-e2e', async (req, res) => {
+  try {
+    const { name, description, mermaidFlowchart, features, temperature } = req.body;
+    if (!mermaidFlowchart) {
+      return res.status(400).json({ error: 'Mermaid flowchart is required.' });
+    }
+
+    const ai = getGeminiClient();
+    const prompt = `
+You are a Staff QA Engineer specializing in End-to-End (E2E) Journey Validation.
+The user is testing an E2E system flow called "${name}".
+Journey Description: "${description}"
+
+Here is the Mermaid flowchart representing the operational states and execution branches of this journey:
+\`\`\`mermaid
+${mermaidFlowchart}
+\`\`\`
+
+Available Specs/Features metadata context (use these to resolve field names, preconditions, and outputs if referenced in the flowchart):
+${JSON.stringify(features || [], null, 2)}
+
+TASK:
+1. Parse the Mermaid flowchart text. Trace and identify the major unique flow paths/execution sequences from start to finish.
+2. Generate EXACTLY one highly detailed, smart, fully descriptive E2E test case for EACH distinct flow path.
+3. For each E2E test case, provide:
+   - id: Unique path ID (e.g. "E2E-TC-001", "E2E-TC-002")
+   - name: A descriptive name of the specific branch path (e.g. "Happy-path Standard Checkout", "Escrow Hold Trigger and Fraud Intercept")
+   - flowPath: Synthesized transition sequence representation (e.g., "LOGIN-001 -> CART-001 -> PAYMENT-001")
+   - preconditions: Unified setups, mock variables, and state requirements needed before starting the sequence.
+   - steps: Seamless chronological step-by-step user and system actions linking the entire sequence of nodes.
+   - expected: Comprehensive final system state, ledger updates, and UI confirmations.
+
+Ensure that each flow path represents exactly 1 coherent, high-quality test case.
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+      config: {
+        systemInstruction: `You are an elite E2E systems architect. Trace the Mermaid flowchart, identify all main and alternative paths, and generate exactly 1 logical E2E test case per path in the requested JSON structure.`,
+        temperature: temperature || 0.3,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          required: ['test_cases'],
+          properties: {
+            test_cases: {
+              type: Type.ARRAY,
+              description: 'Generated smart E2E test cases, exactly one per flow path',
+              items: {
+                type: Type.OBJECT,
+                required: ['id', 'name', 'flowPath', 'preconditions', 'steps', 'expected'],
+                properties: {
+                  id: { type: Type.STRING, description: 'Test Case ID (e.g. E2E-TC-001)' },
+                  name: { type: Type.STRING, description: 'Descriptive path name' },
+                  flowPath: { type: Type.STRING, description: 'Chained features flow representation' },
+                  preconditions: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Setup and prerequisite state variables'
+                  },
+                  steps: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'Sequential execution steps tracing the flowchart nodes'
+                  },
+                  expected: { type: Type.STRING, description: 'Unified final state validation result' }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const resultText = response.text;
+    if (!resultText) {
+      throw new Error('No output text generated from Gemini.');
+    }
+
+    const jsonResult = JSON.parse(resultText);
+    res.json({ success: true, data: jsonResult });
+  } catch (error: any) {
+    console.error('Gemini E2E generation error:', error);
+    res.status(500).json({ success: false, error: error.message || String(error) });
+  }
+});
+
 // Setup Vite Dev server / production server assets serving
 async function bootstrap() {
   if (process.env.NODE_ENV !== 'production') {
