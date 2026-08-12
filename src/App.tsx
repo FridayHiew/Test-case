@@ -4,13 +4,14 @@ import { TestGenDB } from './db/indexedDB';
 import { LLMClient } from './services/llm';
 import FeatureManager from './components/FeatureManager';
 import TestCaseGenerator from './components/TestCaseGenerator';
+import TemplatesManager from './components/TemplatesManager';
 import CacheManager from './components/CacheManager';
 import SettingsPanel from './components/SettingsPanel';
 import SrsProcessor from './components/SrsProcessor';
 import PwaPrompt from './components/PwaPrompt';
 import { 
   Sparkles, Folder, Database, Settings, Cpu, Cloud, 
-  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle, FileText
+  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle, FileText, LayoutGrid
 } from 'lucide-react';
 
 const DEFAULT_CONFIG: AIConfig = {
@@ -22,11 +23,12 @@ const DEFAULT_CONFIG: AIConfig = {
   openaiBaseUrl: 'https://api.deepseek.com/v1',
   openaiModel: 'deepseek-chat',
   temperature: 0.3,
-  maxTokens: 2000
+  maxTokens: 2000,
+  aiCaseLimit: 2
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'generator' | 'srs' | 'manager' | 'cache' | 'settings'>('generator');
+  const [activeTab, setActiveTab] = useState<'generator' | 'srs' | 'manager' | 'templates' | 'cache' | 'settings'>('generator');
   const [features, setFeatures] = useState<Feature[]>([]);
   const [selectedFeatureId, setSelectedFeatureId] = useState<string>('');
   const [cacheCount, setCacheCount] = useState<number>(0);
@@ -243,6 +245,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('templates')}
+            className={`flex items-center justify-center space-x-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+              activeTab === 'templates'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            }`}
+          >
+            <LayoutGrid className="w-4 h-4 shrink-0" />
+            <span>Baseline Templates</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('cache')}
             className={`flex items-center justify-center space-x-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
               activeTab === 'cache'
@@ -277,6 +291,8 @@ export default function App() {
               db={db}
               llmClient={llmClient}
               onCacheChange={refreshCacheStats}
+              config={config}
+              onConfigChange={handleConfigChange}
             />
           )}
 
@@ -294,6 +310,14 @@ export default function App() {
               onSelectFeature={setSelectedFeatureId}
               onRefreshFeatures={refreshFeatures}
               db={db}
+            />
+          )}
+
+          {activeTab === 'templates' && (
+            <TemplatesManager
+              config={config}
+              onConfigChange={handleConfigChange}
+              llmClient={llmClient}
             />
           )}
 

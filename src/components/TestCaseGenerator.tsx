@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Feature, TestResult, TestCase } from '../types';
+import { Feature, TestResult, TestCase, AIConfig } from '../types';
 import { TestGenDB } from '../db/indexedDB';
 import { LLMClient, generateCacheKey } from '../services/llm';
 import { formatResultToMarkdown } from '../utils/formatter';
 import { 
   Play, Copy, Download, RefreshCw, Zap, Check, AlertCircle, 
-  HelpCircle, Sparkles, ChevronDown, CheckCircle, Database
+  HelpCircle, Sparkles, ChevronDown, CheckCircle, Database, Sliders
 } from 'lucide-react';
 
 interface TestCaseGeneratorProps {
@@ -15,6 +15,8 @@ interface TestCaseGeneratorProps {
   db: TestGenDB;
   llmClient: LLMClient;
   onCacheChange: () => void;
+  config: AIConfig;
+  onConfigChange: (newConfig: AIConfig) => void;
 }
 
 export default function TestCaseGenerator({
@@ -23,7 +25,9 @@ export default function TestCaseGenerator({
   onSelectFeature,
   db,
   llmClient,
-  onCacheChange
+  onCacheChange,
+  config,
+  onConfigChange
 }: TestCaseGeneratorProps) {
   const [userInput, setUserInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -188,6 +192,30 @@ export default function TestCaseGenerator({
               className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
               placeholder="e.g. Focus on boundary checks, rate limiting exceptions, security audit..."
             />
+          </div>
+        </div>
+
+        {/* Dynamic AI Case Limit Setting */}
+        <div className="p-3 bg-slate-50/70 border border-slate-150 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2 text-slate-700">
+            <Sliders className="w-4 h-4 text-blue-500" />
+            <div>
+              <span className="font-semibold text-slate-800">AI Specialized Test Cases Target Limit</span>
+              <p className="text-[11px] text-slate-400">Controls how many creative edge cases the AI should generate alongside baseline templates.</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-3 shrink-0">
+            <input
+              type="range"
+              min="1"
+              max="5"
+              value={config.aiCaseLimit ?? 2}
+              onChange={(e) => onConfigChange({ ...config, aiCaseLimit: parseInt(e.target.value, 10) })}
+              className="w-28 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <span className="font-mono font-bold bg-white border border-slate-200 rounded px-2 py-0.5 text-blue-600 w-16 text-center">
+              {config.aiCaseLimit ?? 2} case{(config.aiCaseLimit ?? 2) > 1 ? 's' : ''}
+            </span>
           </div>
         </div>
 

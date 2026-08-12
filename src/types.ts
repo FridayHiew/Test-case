@@ -64,6 +64,7 @@ export interface AIConfig {
   // General Hyperparameters
   temperature: number;
   maxTokens: number;
+  aiCaseLimit?: number;
   // Customizable Baseline Templates
   programmaticTemplates?: BaseCaseTemplate[];
 }

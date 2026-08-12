@@ -476,13 +476,25 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
 
   // Generate prompt for the model
   private buildOptimizedPrompt(feature: Feature, userInput: string): string {
+    const limit = this.config.aiCaseLimit && this.config.aiCaseLimit > 0 ? this.config.aiCaseLimit : 2;
     const depsContext = feature.dependencies && feature.dependencies.length > 0
       ? `\n### Upstream Module Dependencies to assume:\n${feature.dependencies.map(dep => `- Prerequisite completed state established by parent module "${dep}" must be verified.`).join('\n')}`
       : '';
 
+    // Get active programmatic template titles so AI doesn't duplicate them
+    const activeTemplates = this.config.programmaticTemplates && this.config.programmaticTemplates.length > 0
+      ? this.config.programmaticTemplates
+      : DEFAULT_BASE_TEMPLATES;
+    const activeProgrammaticTitles = activeTemplates
+      .filter(t => t.enabled)
+      .map(t => `- ${t.title.replace(/{feature_name}/g, feature.name)}`)
+      .join('\n');
+
     return `
-Please generate exactly 2 highly specialized, advanced test cases that target the unique business rules or custom user specifications of this feature.
-Standard happy-path validations, missing-field checks, and injection sanitization checks are already covered at the code level, so do NOT generate them.
+Please generate exactly ${limit} highly specialized, advanced test cases that target the unique business rules or custom user specifications of this feature.
+
+The following test scenario types are already covered programmatically at the code level. Do NOT generate duplicates of these:
+${activeProgrammaticTitles || '- Standard basic checks'}
 
 ### Feature: ${feature.name}
 ### Description: ${feature.description}${depsContext}
@@ -493,15 +505,16 @@ ${feature.business_rules.map((rule, idx) => `${idx + 1}. ${rule}`).join('\n')}
 ### Target Custom User Test Scope:
 "${userInput || 'Test advanced business rule interactions'}"
 
-Generate ONLY 2 high-value, deep test cases. Reply strictly in JSON format.
+Generate ONLY ${limit} high-value, deep test cases. Reply strictly in JSON format.
 `;
   }
 
   // Build the strict system instruction
   private buildOptimizedSystemInstruction(): string {
+    const limit = this.config.aiCaseLimit && this.config.aiCaseLimit > 0 ? this.config.aiCaseLimit : 2;
     return `
-You are a senior QA & Test Automation Architect. Generate exactly 2 highly specialized test cases focusing purely on intricate business-logic interactions, custom edge cases, or the user's specific test scope.
-Do NOT generate basic, simple validations like empty input checks, because those are already handled programmatically at the code level.
+You are a senior QA & Test Automation Architect. Generate exactly ${limit} highly specialized test cases focusing purely on intricate business-logic interactions, custom edge cases, or the user's specific test scope.
+Do NOT generate basic, simple validations because those are already handled programmatically at the code level.
 
 You MUST reply strictly in JSON format with two top-level fields:
 {
@@ -515,13 +528,13 @@ You MUST reply strictly in JSON format with two top-level fields:
       "expected": "Expected behavior matching specifications"
     }
   ],
-  "coverage": ["Summarize business rules covered by these specific 2 test cases"]
+  "coverage": ["Summarize business rules covered by these specific ${limit} test cases"]
 }
 
 Rules:
 - Ensure valid JSON with double quotes for strings and keys.
 - Do NOT wrap response in extra markdown or commentary outside the JSON.
-- Limit output to exactly 2 specialized test cases to keep processing extremely fast.
+- Limit output to exactly ${limit} specialized test cases to keep processing extremely fast.
 `;
   }
 
