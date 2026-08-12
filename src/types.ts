@@ -40,6 +40,16 @@ export interface CacheEntry {
   createdAt: string;
 }
 
+export interface BaseCaseTemplate {
+  id: string;
+  title: string;
+  type: 'positive' | 'negative' | 'boundary' | 'security' | 'performance';
+  enabled: boolean;
+  preconditions: string[];
+  steps: string[];
+  expected: string;
+}
+
 export interface AIConfig {
   aiMode: 'offline' | 'online' | 'webllm';
   // Offline Ollama Config
@@ -54,4 +64,6 @@ export interface AIConfig {
   // General Hyperparameters
   temperature: number;
   maxTokens: number;
+  // Customizable Baseline Templates
+  programmaticTemplates?: BaseCaseTemplate[];
 }

@@ -1,4 +1,67 @@
-import { AIConfig, Feature, TestResult } from '../types';
+import { AIConfig, Feature, TestResult, BaseCaseTemplate } from '../types';
+
+export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
+  {
+    id: 'happy-path',
+    title: 'Verify happy-path execution of "{feature_name}" with fully compliant inputs',
+    type: 'positive',
+    enabled: true,
+    preconditions: [
+      '{dependencies}',
+      'Subsystem "{feature_name}" is loaded and fully responsive.'
+    ],
+    steps: [
+      '1. Navigate to the "{feature_name}" workspace interface.',
+      '2. Fill in all required fields ({required_inputs}) with valid mock values.',
+      '3. Submit the transaction or click the action button.'
+    ],
+    expected: 'The system processes the request successfully. Output contract [{output_names}] is generated correctly according to the specifications.'
+  },
+  {
+    id: 'input-validation',
+    title: 'Verify input validation locks when required fields are left blank',
+    type: 'negative',
+    enabled: true,
+    preconditions: [
+      'Subsystem "{feature_name}" is loaded.',
+      'User is viewing the input form fields.'
+    ],
+    steps: [
+      '1. Intentionally clear all required fields: {required_inputs}.',
+      '2. Attempt to trigger the action or submit the form.'
+    ],
+    expected: 'The system halts execution, displays high-visibility inline validation warnings, and prevents form submission.'
+  },
+  {
+    id: 'boundary-check',
+    title: 'Verify system boundary checks and graceful error handling',
+    type: 'boundary',
+    enabled: true,
+    preconditions: [
+      'Active database connectivity is verified.',
+      'User is on the entry form for "{feature_name}".'
+    ],
+    steps: [
+      '{bounds_steps}',
+      '2. Attempt submission.'
+    ],
+    expected: 'The system handles the boundary ranges gracefully, blocks bad data, and alerts the user with helpful feedback.'
+  },
+  {
+    id: 'security-guard',
+    title: 'Verify input sanitization against SQL Injection and Scripting (XSS) vectors',
+    type: 'security',
+    enabled: true,
+    preconditions: [
+      'Security filters and middlewares are active for "{feature_name}".'
+    ],
+    steps: [
+      '1. Insert special script payloads (e.g. <script>alert(1)</script>) and query clauses (e.g. \' OR 1=1 --) into text inputs.',
+      '2. Attempt submission.'
+    ],
+    expected: 'The application sterilizes HTML/SQL special characters, filters the request safely, or handles the inputs as harmless plain text.'
+  }
+];
 
 // Helper to safely verify WebGPU hardware adapter
 export async function checkWebGPUAvailability(): Promise<{ 
@@ -263,6 +326,26 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
     }
   }
 
+  // Helper to dynamically compile placeholders inside baseline templates
+  private compileTemplateValue(val: string, feature: Feature, requiredNames: string, outputNames: string): string {
+    let result = val;
+    result = result.replace(/{feature_id}/g, feature.id.toUpperCase());
+    result = result.replace(/{feature_name}/g, feature.name);
+    result = result.replace(/{required_inputs}/g, requiredNames || 'standard inputs');
+    result = result.replace(/{output_names}/g, outputNames);
+
+    // Resolve dependencies placeholder
+    if (result.includes('{dependencies}')) {
+      if (feature.dependencies && feature.dependencies.length > 0) {
+        result = result.replace(/{dependencies}/g, `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`);
+      } else {
+        result = result.replace(/{dependencies}/g, 'User is authenticated with active session privileges.');
+      }
+    }
+
+    return result;
+  }
+
   // Programmatic, high-performance code-level test case generator
   public generateCodeLevelTestCases(feature: Feature): TestResult {
     const test_cases: any[] = [];
@@ -277,51 +360,8 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
     const requiredNames = requiredInputs.map(f => `"${f.name}"`).join(', ');
     const outputNames = Object.keys(feature.output || {}).map(key => `"${key}"`).join(', ') || 'expected action state';
 
-    // 1. Happy Path Test Case
-    const dependencyPreconditions = feature.dependencies && feature.dependencies.length > 0
-      ? [
-          `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`,
-          `Upstream database states established by parent models [${feature.dependencies.join(', ')}] are accessible.`
-        ]
-      : ['User is authenticated with active session privileges.'];
-
-    test_cases.push({
-      id: `TC-${feature.id.toUpperCase()}-001`,
-      title: `Verify happy-path execution of "${feature.name}" with fully compliant inputs`,
-      type: 'positive',
-      preconditions: [
-        ...dependencyPreconditions,
-        `Subsystem "${feature.name}" is loaded and fully responsive.`
-      ],
-      steps: [
-        `1. Navigate to the "${feature.name}" workspace interface.`,
-        `2. Fill in all required fields (${requiredNames || 'standard inputs'}) with valid mock values.`,
-        `3. Submit the transaction or click the action button.`
-      ],
-      expected: `The system processes the request successfully. Output contract [${outputNames}] is generated correctly according to the specifications.`
-    });
-
-    // 2. Input Validation / Empty Checks
-    if (requiredInputs.length > 0) {
-      test_cases.push({
-        id: `TC-${feature.id.toUpperCase()}-002`,
-        title: `Verify input validation locks when required fields are left blank`,
-        type: 'negative',
-        preconditions: [
-          `Subsystem "${feature.name}" is loaded.`,
-          'User is viewing the input form fields.'
-        ],
-        steps: [
-          `1. Intentionally clear all required fields: ${requiredNames}.`,
-          '2. Attempt to trigger the action or submit the form.'
-        ],
-        expected: 'The system halts execution, displays high-visibility inline validation warnings, and prevents form submission.'
-      });
-    }
-
-    // 3. Boundary & Type Check
     const boundsInputs = (feature.input_fields || []).filter(f => f.min !== undefined || f.max !== undefined || f.format !== undefined || f.type !== 'string');
-    const boundSteps = boundsInputs.length > 0
+    const boundStepsList = boundsInputs.length > 0
       ? boundsInputs.map((f, idx) => {
           const limitsText = [
             f.min !== undefined ? `min: ${f.min}` : '',
@@ -332,35 +372,58 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
         })
       : ['1. Input excessively large strings or extreme numerical boundary values into form inputs.'];
 
-    test_cases.push({
-      id: `TC-${feature.id.toUpperCase()}-003`,
-      title: `Verify system boundary checks and graceful error handling`,
-      type: 'boundary',
-      preconditions: [
-        'Active database connectivity is verified.',
-        `User is on the entry form for "${feature.name}".`
-      ],
-      steps: [
-        ...boundSteps,
-        '2. Attempt submission.'
-      ],
-      expected: 'The system handles the boundary ranges gracefully, blocks bad data, and alerts the user with helpful feedback.'
-    });
+    // Select active templates from config or fall back to DEFAULT_BASE_TEMPLATES
+    const activeTemplates = this.config.programmaticTemplates && this.config.programmaticTemplates.length > 0
+      ? this.config.programmaticTemplates
+      : DEFAULT_BASE_TEMPLATES;
 
-    // 4. Security / Injection Guard
-    test_cases.push({
-      id: `TC-${feature.id.toUpperCase()}-004`,
-      title: `Verify input sanitization against SQL Injection and Scripting (XSS) vectors`,
-      type: 'security',
-      preconditions: [
-        `Security filters and middlewares are active for "${feature.name}".`
-      ],
-      steps: [
-        `1. Insert special script payloads (e.g. <script>alert(1)</script>) and query clauses (e.g. ' OR 1=1 --) into text inputs.`,
-        '2. Attempt submission.'
-      ],
-      expected: 'The application sterilizes HTML/SQL special characters, filters the request safely, or handles the inputs as harmless plain text.'
-    });
+    let index = 1;
+    for (const template of activeTemplates) {
+      if (!template.enabled) continue;
+
+      // Skip input-validation if no required inputs are present
+      if (template.id === 'input-validation' && requiredInputs.length === 0) {
+        continue;
+      }
+
+      // Compile preconditions
+      const compiledPreconditions: string[] = [];
+      for (const pre of template.preconditions) {
+        if (pre.includes('{dependencies}') && feature.dependencies && feature.dependencies.length > 0) {
+          // Add detailed dependencies preconditions
+          compiledPreconditions.push(
+            `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`,
+            `Upstream database states established by parent models [${feature.dependencies.join(', ')}] are accessible.`
+          );
+        } else {
+          compiledPreconditions.push(this.compileTemplateValue(pre, feature, requiredNames, outputNames));
+        }
+      }
+
+      // Compile steps
+      const compiledSteps: string[] = [];
+      for (const step of template.steps) {
+        if (step.includes('{bounds_steps}')) {
+          compiledSteps.push(...boundStepsList);
+        } else {
+          compiledSteps.push(this.compileTemplateValue(step, feature, requiredNames, outputNames));
+        }
+      }
+
+      // Compile expected
+      const compiledExpected = this.compileTemplateValue(template.expected, feature, requiredNames, outputNames);
+
+      test_cases.push({
+        id: `TC-${feature.id.toUpperCase()}-${String(index).padStart(3, '0')}`,
+        title: this.compileTemplateValue(template.title, feature, requiredNames, outputNames),
+        type: template.type,
+        preconditions: compiledPreconditions,
+        steps: compiledSteps,
+        expected: compiledExpected
+      });
+
+      index++;
+    }
 
     return { test_cases, coverage };
   }
