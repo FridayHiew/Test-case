@@ -1,7 +1,20 @@
 import { AIConfig, Feature, TestResult } from '../types';
 
 // Helper to safely verify WebGPU hardware adapter
-export async function checkWebGPUAvailability(): Promise<{ supported: boolean; reason?: string }> {
+export async function checkWebGPUAvailability(): Promise<{ 
+  supported: boolean; 
+  reason?: string;
+  adapterInfo?: {
+    vendor?: string;
+    architecture?: string;
+    device?: string;
+    description?: string;
+  };
+  limits?: {
+    maxStorageBufferBindingSize?: number;
+    maxComputeWorkgroupStorageSize?: number;
+  };
+}> {
   if (typeof navigator === 'undefined' || !(navigator as any).gpu) {
     return {
       supported: false,
@@ -19,7 +32,31 @@ export async function checkWebGPUAvailability(): Promise<{ supported: boolean; r
       };
     }
 
-    return { supported: true };
+    let adapterInfo = {};
+    if (adapter.requestAdapterInfo) {
+      try {
+        const reqInfo = await adapter.requestAdapterInfo();
+        adapterInfo = {
+          vendor: reqInfo.vendor || '',
+          architecture: reqInfo.architecture || '',
+          device: reqInfo.device || '',
+          description: reqInfo.description || ''
+        };
+      } catch (e) {
+        // requestAdapterInfo might reject in some strict iframes
+      }
+    }
+
+    const limits = {
+      maxStorageBufferBindingSize: adapter.limits?.maxStorageBufferBindingSize || 0,
+      maxComputeWorkgroupStorageSize: adapter.limits?.maxComputeWorkgroupStorageSize || 0,
+    };
+
+    return { 
+      supported: true,
+      adapterInfo,
+      limits
+    };
   } catch (err: any) {
     return {
       supported: false,
@@ -35,6 +72,20 @@ export class LLMClient {
 
   constructor(config: AIConfig) {
     this.config = config;
+  }
+
+  // Hard reset of the local browser engine
+  async resetEngine(): Promise<void> {
+    if (this.webLlmEngine) {
+      try {
+        if (typeof this.webLlmEngine.unload === 'function') {
+          await this.webLlmEngine.unload();
+        }
+      } catch (err) {
+        console.warn('Error unloading WebLLM engine:', err);
+      }
+    }
+    this.webLlmEngine = null;
   }
 
   // Set progress callback for WebLLM model loading progress
@@ -212,72 +263,191 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
     }
   }
 
+  // Programmatic, high-performance code-level test case generator
+  public generateCodeLevelTestCases(feature: Feature): TestResult {
+    const test_cases: any[] = [];
+    const coverage: string[] = [
+      'Code-level inputs and structural verification',
+      'Security-focused validation guards',
+      'Transaction lifecycle validations',
+      'Boundary boundary conditions checks'
+    ];
+
+    const requiredInputs = (feature.input_fields || []).filter(f => f.required);
+    const requiredNames = requiredInputs.map(f => `"${f.name}"`).join(', ');
+    const outputNames = Object.keys(feature.output || {}).map(key => `"${key}"`).join(', ') || 'expected action state';
+
+    // 1. Happy Path Test Case
+    test_cases.push({
+      id: `TC-${feature.id.toUpperCase()}-001`,
+      title: `Verify happy-path execution of "${feature.name}" with fully compliant inputs`,
+      type: 'positive',
+      preconditions: [
+        'User is authenticated with active session privileges.',
+        `Subsystem "${feature.name}" is loaded and fully responsive.`
+      ],
+      steps: [
+        `1. Navigate to the "${feature.name}" workspace interface.`,
+        `2. Fill in all required fields (${requiredNames || 'standard inputs'}) with valid mock values.`,
+        `3. Submit the transaction or click the action button.`
+      ],
+      expected: `The system processes the request successfully. Output contract [${outputNames}] is generated correctly according to the specifications.`
+    });
+
+    // 2. Input Validation / Empty Checks
+    if (requiredInputs.length > 0) {
+      test_cases.push({
+        id: `TC-${feature.id.toUpperCase()}-002`,
+        title: `Verify input validation locks when required fields are left blank`,
+        type: 'negative',
+        preconditions: [
+          `Subsystem "${feature.name}" is loaded.`,
+          'User is viewing the input form fields.'
+        ],
+        steps: [
+          `1. Intentionally clear all required fields: ${requiredNames}.`,
+          '2. Attempt to trigger the action or submit the form.'
+        ],
+        expected: 'The system halts execution, displays high-visibility inline validation warnings, and prevents form submission.'
+      });
+    }
+
+    // 3. Boundary & Type Check
+    const boundsInputs = (feature.input_fields || []).filter(f => f.min !== undefined || f.max !== undefined || f.format !== undefined || f.type !== 'string');
+    const boundSteps = boundsInputs.length > 0
+      ? boundsInputs.map((f, idx) => {
+          const limitsText = [
+            f.min !== undefined ? `min: ${f.min}` : '',
+            f.max !== undefined ? `max: ${f.max}` : '',
+            f.format ? `format: ${f.format}` : ''
+          ].filter(Boolean).join(', ');
+          return `${idx + 1}. Insert out-of-bounds or mismatching type values in "${f.name}" (${f.type}${limitsText ? `, constraints: ${limitsText}` : ''}).`;
+        })
+      : ['1. Input excessively large strings or extreme numerical boundary values into form inputs.'];
+
+    test_cases.push({
+      id: `TC-${feature.id.toUpperCase()}-003`,
+      title: `Verify system boundary checks and graceful error handling`,
+      type: 'boundary',
+      preconditions: [
+        'Active database connectivity is verified.',
+        `User is on the entry form for "${feature.name}".`
+      ],
+      steps: [
+        ...boundSteps,
+        '2. Attempt submission.'
+      ],
+      expected: 'The system handles the boundary ranges gracefully, blocks bad data, and alerts the user with helpful feedback.'
+    });
+
+    // 4. Security / Injection Guard
+    test_cases.push({
+      id: `TC-${feature.id.toUpperCase()}-004`,
+      title: `Verify input sanitization against SQL Injection and Scripting (XSS) vectors`,
+      type: 'security',
+      preconditions: [
+        `Security filters and middlewares are active for "${feature.name}".`
+      ],
+      steps: [
+        `1. Insert special script payloads (e.g. <script>alert(1)</script>) and query clauses (e.g. ' OR 1=1 --) into text inputs.`,
+        '2. Attempt submission.'
+      ],
+      expected: 'The application sterilizes HTML/SQL special characters, filters the request safely, or handles the inputs as harmless plain text.'
+    });
+
+    return { test_cases, coverage };
+  }
+
   // Generate test cases based on feature metadata and user natural language input
   async generate(feature: Feature, userInput: string): Promise<TestResult> {
-    const prompt = this.buildPrompt(feature, userInput);
-    const systemInstruction = this.buildSystemInstruction();
+    // 1. Programmatically generate robust, high-quality base test cases instantly
+    const programmaticResult = this.generateCodeLevelTestCases(feature);
 
-    if (this.config.aiMode === 'webllm') {
-      return this.generateWebLlm(prompt, systemInstruction);
-    } else if (this.config.aiMode === 'offline') {
-      return this.generateOffline(prompt, systemInstruction);
-    } else {
-      const isBuiltIn = !this.config.openaiApiKey || this.config.openaiApiKey.trim() === '';
-      if (isBuiltIn) {
-        return this.generateBuiltIn(prompt, systemInstruction);
+    try {
+      // 2. Build the lightweight, optimized AI prompt requesting only custom/complex rule validations
+      const prompt = this.buildOptimizedPrompt(feature, userInput);
+      const systemInstruction = this.buildOptimizedSystemInstruction();
+
+      let aiResult: TestResult;
+
+      if (this.config.aiMode === 'webllm') {
+        aiResult = await this.generateWebLlm(prompt, systemInstruction);
+      } else if (this.config.aiMode === 'offline') {
+        aiResult = await this.generateOffline(prompt, systemInstruction);
       } else {
-        return this.generateOnlineCustom(prompt, systemInstruction);
+        const isBuiltIn = !this.config.openaiApiKey || this.config.openaiApiKey.trim() === '';
+        if (isBuiltIn) {
+          aiResult = await this.generateBuiltIn(prompt, systemInstruction);
+        } else {
+          aiResult = await this.generateOnlineCustom(prompt, systemInstruction);
+        }
       }
+
+      // Merge the programmatic test suite with the AI's specialized rule/scope validations
+      const combinedTestCases = [...programmaticResult.test_cases, ...aiResult.test_cases];
+      const combinedCoverage = [...new Set([...programmaticResult.coverage, ...aiResult.coverage])];
+
+      // Ensure unique IDs across all merged test cases
+      const uniqueTestCases = combinedTestCases.map((tc, index) => ({
+        ...tc,
+        id: `TC-${feature.id.toUpperCase()}-${String(index + 1).padStart(3, '0')}`
+      }));
+
+      return {
+        test_cases: uniqueTestCases,
+        coverage: combinedCoverage
+      };
+    } catch (err: any) {
+      console.warn('AI generation failed or hit local memory/quota limitations. Falling back to robust code-level suite:', err);
+      // Perfect fallback: return programmatic cases so the application never fails
+      return programmaticResult;
     }
   }
 
   // Generate prompt for the model
-  private buildPrompt(feature: Feature, userInput: string): string {
+  private buildOptimizedPrompt(feature: Feature, userInput: string): string {
     return `
-Please generate structured test cases for the following software feature specification:
+Please generate exactly 2 highly specialized, advanced test cases that target the unique business rules or custom user specifications of this feature.
+Standard happy-path validations, missing-field checks, and injection sanitization checks are already covered at the code level, so do NOT generate them.
 
-### Feature ID: ${feature.id}
-### Feature Name: ${feature.name} (v${feature.version})
+### Feature: ${feature.name}
 ### Description: ${feature.description}
 
-### Input Fields:
-${JSON.stringify(feature.input_fields, null, 2)}
-
-### Business Rules:
+### Business Rules to cover:
 ${feature.business_rules.map((rule, idx) => `${idx + 1}. ${rule}`).join('\n')}
 
-### Expected Outputs & Contract:
-${JSON.stringify(feature.output, null, 2)}
+### Target Custom User Test Scope:
+"${userInput || 'Test advanced business rule interactions'}"
 
-${feature.dependencies && feature.dependencies.length > 0 ? `### Dependent Feature IDs: ${feature.dependencies.join(', ')}` : ''}
-
-### Additional Custom Test Scope (User Request):
-"${userInput || 'Generate comprehensive positive tests, negative exception tests, and boundary value tests'}"
-
-Ensure the generated test cases thoroughly cover all input field constraints and business rules above, especially the custom test scope.
-You MUST respond strictly in valid JSON format without any surrounding commentary.
+Generate ONLY 2 high-value, deep test cases. Reply strictly in JSON format.
 `;
   }
 
   // Build the strict system instruction
-  private buildSystemInstruction(): string {
+  private buildOptimizedSystemInstruction(): string {
     return `
-You are a senior Lead QA & Test Automation Engineer. Your task is to design a comprehensive, logically rigorous test suite based on the provided feature metadata and user requirements.
+You are a senior QA & Test Automation Architect. Generate exactly 2 highly specialized test cases focusing purely on intricate business-logic interactions, custom edge cases, or the user's specific test scope.
+Do NOT generate basic, simple validations like empty input checks, because those are already handled programmatically at the code level.
 
 You MUST reply strictly in JSON format with two top-level fields:
-1. "test_cases": Array of test case objects. Each object must contain:
-   - "id": String unique identifier, e.g., "TC-001", "TC-002"
-   - "title": String concise test title indicating the test point
-   - "type": String, must be one of: "positive", "negative", "boundary", "security", "performance"
-   - "preconditions": Array of strings listing preconditions
-   - "steps": Array of strings listing detailed, sequential execution steps
-   - "expected": String describing the clear expected outcome
-2. "coverage": Array of strings summarizing the business rules, boundary conditions, and security aspects covered.
+{
+  "test_cases": [
+    {
+      "id": "TC-SPEC-1",
+      "title": "Concise test title focusing on business rules or custom scope",
+      "type": "positive", // or "negative", "boundary", "security", "performance"
+      "preconditions": ["List 1-2 preconditions"],
+      "steps": ["Step 1...", "Step 2..."],
+      "expected": "Expected behavior matching specifications"
+    }
+  ],
+  "coverage": ["Summarize business rules covered by these specific 2 test cases"]
+}
 
 Rules:
-- Ensure valid JSON syntax with double quotes for strings and keys.
+- Ensure valid JSON with double quotes for strings and keys.
 - Do NOT wrap response in extra markdown or commentary outside the JSON.
-- Test cases must be actionable, clear, and unambiguous.
+- Limit output to exactly 2 specialized test cases to keep processing extremely fast.
 `;
   }
 
