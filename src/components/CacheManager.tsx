@@ -25,6 +25,7 @@ export default function CacheManager({
   const [isPreheating, setIsPreheating] = useState(false);
   const [preheatProgress, setPreheatProgress] = useState({ current: 0, total: 0, currentFeatureName: '' });
   const [preheatResults, setPreheatResults] = useState<{ id: string; success: boolean; msg: string }[]>([]);
+  const [flushSuccess, setFlushSuccess] = useState(false);
 
   // Simple statistics
   const timeSavedSec = cacheCount * 5.2; // approx 5.2 seconds saved per AI fetch
@@ -34,9 +35,17 @@ export default function CacheManager({
     if (!window.confirm('Are you sure you want to clear all test case caches? This will delete all locally cached test cases.')) return;
 
     try {
+      setFlushSuccess(false);
       await db.clearCache();
+      
+      // Crucial: IndexedDB commits transaction asynchronously. Wait 150ms to ensure full DB commit
+      // before reading counts and updating React states.
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
       onCacheRefresh();
       setPreheatResults([]);
+      setFlushSuccess(true);
+      setTimeout(() => setFlushSuccess(false), 4000);
     } catch (err: any) {
       alert(`Failed to clear cache: ${err.message}`);
     }
@@ -199,16 +208,22 @@ export default function CacheManager({
                 If you updated model parameters, prompt engineering rules, or LLM backends, reset the cache store to align future outputs with your latest configuration.
               </p>
             </div>
-            <div className="pt-2">
+            <div className="pt-2 flex items-center space-x-3">
               <button
                 type="button"
                 onClick={handleClearCache}
-                disabled={isPreheating || cacheCount === 0}
+                disabled={isPreheating}
                 className="inline-flex items-center py-2 px-4 bg-rose-50 border border-rose-200 hover:bg-rose-100/50 text-rose-700 rounded-lg text-xs font-semibold transition disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5 mr-1.5 text-rose-600" />
                 Flush All Caches
               </button>
+              {flushSuccess && (
+                <span className="inline-flex items-center text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-lg animate-fade-in animate-pulse">
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-500" />
+                  Store Flushed!
+                </span>
+              )}
             </div>
           </div>
         </div>

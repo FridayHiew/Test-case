@@ -109,6 +109,23 @@ export class LLMClient {
           message: `Browser WebLLM engine ready! Loaded model: [${this.config.webllmModel}]`
         };
       } catch (err: any) {
+        const errMsg = err.message || '';
+        const isShaderError = errMsg.includes('ShaderModule') || 
+                              errMsg.includes('index_kernel') || 
+                              errMsg.includes('compute stage') || 
+                              errMsg.includes('pipeline');
+        
+        if (isShaderError) {
+          return {
+            success: false,
+            message: `Failed to initialize local WebLLM engine: WebGPU Shader Compilation Error (index_kernel validation failure).
+
+This is a known driver/platform compatibility issue with compiling WebAssembly model shaders on specific GPUs.
+
+💡 RECOMMENDATION:
+Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab at the top. They are completely unaffected by WebGPU driver bugs.`
+          };
+        }
         return {
           success: false,
           message: `Failed to initialize local WebLLM engine: ${err.message || 'Network error or insufficient GPU memory.'}`
@@ -284,6 +301,22 @@ Rules:
       const rawText = response.choices[0].message.content || '';
       return this.parseAndCleanJson(rawText);
     } catch (err: any) {
+      const errMsg = err.message || '';
+      const isShaderError = errMsg.includes('ShaderModule') || 
+                            errMsg.includes('index_kernel') || 
+                            errMsg.includes('compute stage') || 
+                            errMsg.includes('pipeline');
+      
+      if (isShaderError) {
+        throw new Error(`Browser WebLLM generation failed: WebGPU Shader Compilation Error (index_kernel validation failure). 
+        
+This is a known compatibility issue between certain GPU/graphics driver configurations and local model shader execution.
+
+💡 QUICK REMEDIES:
+1. Switch to "Built-in Gemini Cloud" mode (Highly recommended! Free, zero setup, fast, and completely bypasses local hardware issues).
+2. Go to the "Engine Settings" tab and select an alternative model size (e.g., Qwen2.5-0.5B is highly lightweight and compatible).
+3. Try running the app in a different WebGPU-enabled browser or updating your GPU drivers.`);
+      }
       throw new Error(`Browser WebLLM generation failed: ${err.message || 'WebGPU timeout or insufficient VRAM memory.'}`);
     }
   }
