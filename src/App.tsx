@@ -6,10 +6,11 @@ import FeatureManager from './components/FeatureManager';
 import TestCaseGenerator from './components/TestCaseGenerator';
 import CacheManager from './components/CacheManager';
 import SettingsPanel from './components/SettingsPanel';
+import SrsProcessor from './components/SrsProcessor';
 import PwaPrompt from './components/PwaPrompt';
 import { 
   Sparkles, Folder, Database, Settings, Cpu, Cloud, 
-  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle
+  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle, FileText
 } from 'lucide-react';
 
 const DEFAULT_CONFIG: AIConfig = {
@@ -25,7 +26,7 @@ const DEFAULT_CONFIG: AIConfig = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'generator' | 'manager' | 'cache' | 'settings'>('generator');
+  const [activeTab, setActiveTab] = useState<'generator' | 'srs' | 'manager' | 'cache' | 'settings'>('generator');
   const [features, setFeatures] = useState<Feature[]>([]);
   const [selectedFeatureId, setSelectedFeatureId] = useState<string>('');
   const [cacheCount, setCacheCount] = useState<number>(0);
@@ -218,6 +219,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('srs')}
+            className={`flex items-center justify-center space-x-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+              activeTab === 'srs'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            }`}
+          >
+            <FileText className="w-4 h-4 shrink-0" />
+            <span>SRS Processor</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('manager')}
             className={`flex items-center justify-center space-x-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
               activeTab === 'manager'
@@ -264,6 +277,13 @@ export default function App() {
               db={db}
               llmClient={llmClient}
               onCacheChange={refreshCacheStats}
+            />
+          )}
+
+          {activeTab === 'srs' && (
+            <SrsProcessor
+              db={db}
+              onImportComplete={refreshFeatures}
             />
           )}
 

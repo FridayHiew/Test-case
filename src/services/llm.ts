@@ -278,12 +278,19 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
     const outputNames = Object.keys(feature.output || {}).map(key => `"${key}"`).join(', ') || 'expected action state';
 
     // 1. Happy Path Test Case
+    const dependencyPreconditions = feature.dependencies && feature.dependencies.length > 0
+      ? [
+          `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`,
+          `Upstream database states established by parent models [${feature.dependencies.join(', ')}] are accessible.`
+        ]
+      : ['User is authenticated with active session privileges.'];
+
     test_cases.push({
       id: `TC-${feature.id.toUpperCase()}-001`,
       title: `Verify happy-path execution of "${feature.name}" with fully compliant inputs`,
       type: 'positive',
       preconditions: [
-        'User is authenticated with active session privileges.',
+        ...dependencyPreconditions,
         `Subsystem "${feature.name}" is loaded and fully responsive.`
       ],
       steps: [
@@ -406,12 +413,16 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
 
   // Generate prompt for the model
   private buildOptimizedPrompt(feature: Feature, userInput: string): string {
+    const depsContext = feature.dependencies && feature.dependencies.length > 0
+      ? `\n### Upstream Module Dependencies to assume:\n${feature.dependencies.map(dep => `- Prerequisite completed state established by parent module "${dep}" must be verified.`).join('\n')}`
+      : '';
+
     return `
 Please generate exactly 2 highly specialized, advanced test cases that target the unique business rules or custom user specifications of this feature.
 Standard happy-path validations, missing-field checks, and injection sanitization checks are already covered at the code level, so do NOT generate them.
 
 ### Feature: ${feature.name}
-### Description: ${feature.description}
+### Description: ${feature.description}${depsContext}
 
 ### Business Rules to cover:
 ${feature.business_rules.map((rule, idx) => `${idx + 1}. ${rule}`).join('\n')}
