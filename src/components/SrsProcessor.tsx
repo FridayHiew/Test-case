@@ -14,11 +14,12 @@ interface SrsProcessorProps {
 const LIST_TEMPLATE = `# SRS-001: User Profile Update
 **Version:** 1.2.0
 **Description:** Allows registered members to modify their profile name, avatar url, and subscription status.
+**Assumptions / Pre-conditions:** User holds an active authenticated session with verified email permissions.
 
 ## Input Fields
-- \`displayName\` (type: string, required: true, min: 3, max: 50)
-- \`avatarUrl\` (type: string, required: false, format: url)
-- \`receiveEmails\` (type: boolean, required: false)
+- \`displayName\` (type: string, required: true, min: 3, max: 50, validation: "^[a-zA-Z0-9 ]+$", description: "Display name visible to other network users")
+- \`avatarUrl\` (type: string, required: false, format: url, description: "Public HTTPS profile image web address")
+- \`receiveEmails\` (type: boolean, required: false, description: "Opt-in flag for promotional and security email updates")
 
 ## Business Rules
 1. Display name can only contain alphanumeric characters and spaces.
@@ -31,19 +32,23 @@ const LIST_TEMPLATE = `# SRS-001: User Profile Update
 - \`message\`: string (feedback)
 
 ## Dependencies
-- USER-AUTH-001, COMPLIANCE-009`;
+- USER-AUTH-001, COMPLIANCE-009
+
+## Reference
+- ISO/IEC 25010 Software Quality Model, IEEE Std 830-1998 SRS Guidelines`;
 
 const TABLE_TEMPLATE = `# SRS-002: Payment Checkout
 **Version:** 2.1.0
 **Description:** Processes user checkout sessions and initiates secure Stripe payment sequences.
+**Assumptions / Pre-conditions:** Payment gateway sandbox credentials and merchant account are active.
 
 ## Input Fields
-| Field Name | Type | Required | Format/Limits |
-| :--- | :--- | :--- | :--- |
-| cartId | string | Yes | UUID format |
-| amount | number | Yes | Min: 0.50, Max: 10000 |
-| currency | string | Yes | 3-letter currency code |
-| discountCode | string | No | Alphanumeric |
+| Field Name | Type | Required | Format/Limits | Validation | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| cartId | string | Yes | UUID format | ^[a-f0-9-]{36}$ | Unique active shopping cart session identifier |
+| amount | number | Yes | Min: 0.50, Max: 10000 | > 0 | Total checkout transaction currency amount |
+| currency | string | Yes | 3-letter currency code | ^[A-Z]{3}$ | ISO 4217 standard currency symbol |
+| discountCode | string | No | Alphanumeric | ^[A-Z0-9_-]+$ | Optional promotional coupon code |
 
 ## Business Rules
 1. Cart amount must exceed the minimum payment limit of $0.50.
@@ -58,7 +63,10 @@ const TABLE_TEMPLATE = `# SRS-002: Payment Checkout
 | status | string | Final state ("success" or "declined") |
 
 ## Dependencies
-- CART-001, STRIPE-API-002`;
+- CART-001, STRIPE-API-002
+
+## Reference
+- Stripe API Specification v2023-10-16, PCI-DSS Compliance Requirement 6.5`;
 
 export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps) {
   const [markdown, setMarkdown] = useState<string>(LIST_TEMPLATE);
@@ -114,13 +122,16 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
         continue;
       }
 
-      const assumptionsMatch = line.match(/^\*\*Assumptions:\*\*\s*(.*)$/i) || line.match(/^Assumptions:\s*(.*)$/i) || line.match(/^\*\*Pre-conditions:\*\*\s*(.*)$/i) || line.match(/^Pre-conditions:\s*(.*)$/i);
+      const assumptionsMatch = line.match(/^\*\*Assumptions(?:\s*[\/|&]\s*Pre-conditions)?:\*\*\s*(.*)$/i) || 
+                               line.match(/^Assumptions(?:\s*[\/|&]\s*Pre-conditions)?:\s*(.*)$/i) || 
+                               line.match(/^\*\*Pre-conditions:\*\*\s*(.*)$/i) || 
+                               line.match(/^Pre-conditions:\s*(.*)$/i);
       if (assumptionsMatch) {
         assumptions = assumptionsMatch[1].replace(/[*_]/g, '').trim();
         continue;
       }
 
-      const referenceMatch = line.match(/^\*\*Reference:\*\*\s*(.*)$/i) || line.match(/^Reference:\s*(.*)$/i) || line.match(/^\*\*References:\*\*\s*(.*)$/i) || line.match(/^References:\s*(.*)$/i);
+      const referenceMatch = line.match(/^\*\*Reference[s]?:\*\*\s*(.*)$/i) || line.match(/^Reference[s]?:\s*(.*)$/i);
       if (referenceMatch) {
         reference = referenceMatch[1].replace(/[*_]/g, '').trim();
         continue;
@@ -137,6 +148,8 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
           currentSection = 'outputs';
         } else if (secHeader.includes('depend')) {
           currentSection = 'dependencies';
+        } else if (secHeader.includes('reference')) {
+          currentSection = 'reference';
         } else {
           currentSection = '';
         }
@@ -145,7 +158,7 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
 
       // Parse list-items or table-rows based on current active section
       if (currentSection === 'inputs') {
-        // Layout 1: List layout: - `displayName` (type: string, required: true, min: 3, max: 50)
+        // Layout 1: List layout: - `displayName` (type: string, required: true, min: 3, max: 50, validation: "...", description: "...")
         if (line.startsWith('-')) {
           const fieldNameMatch = line.match(/`([^`]+)`/);
           if (fieldNameMatch) {
@@ -173,7 +186,7 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             input_fields.push(inputField);
           }
         } 
-        // Layout 2: Tabular layout: | cartId | string | Yes | UUID format |
+        // Layout 2: Tabular layout: | cartId | string | Yes | UUID format | validation | description |
         else if (line.startsWith('|')) {
           const cells = line.split('|').map(c => c.trim()).filter(Boolean);
           // Skip header row and formatting rows (e.g. |---|---|)
@@ -182,6 +195,8 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             const type = cells[1].toLowerCase() || 'string';
             const isRequired = cells[2].toLowerCase().includes('yes') || cells[2].toLowerCase().includes('true');
             const limitsCol = cells[3] || '';
+            const valCol = cells.length >= 5 ? cells[4] : '';
+            const descCol = cells.length >= 6 ? cells[5] : (cells.length === 5 && !valCol.includes('^') && !valCol.includes('>') ? valCol : '');
 
             const inputField: InputField = {
               name: fieldName,
@@ -201,6 +216,9 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             } else if (limitsCol && !minMatch && !maxMatch) {
               inputField.format = limitsCol; // Fallback to raw string
             }
+
+            if (valCol && valCol !== descCol) inputField.validation = valCol;
+            if (descCol) inputField.description = descCol;
 
             input_fields.push(inputField);
           }
@@ -243,6 +261,13 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
           // Supports comma-separated dependencies: USER-001, AUTH-002
           const parts = depLine.split(',').map(p => p.trim()).filter(Boolean);
           dependencies.push(...parts);
+        }
+      }
+
+      else if (currentSection === 'reference') {
+        const refLine = line.replace(/^[-*\s]+/, '').trim();
+        if (refLine) {
+          reference = reference ? `${reference}; ${refLine}` : refLine;
         }
       }
     }
@@ -394,40 +419,54 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
                     <span className="text-[9px] uppercase font-bold text-slate-400 block">Description</span>
                     <span className="text-slate-600 truncate block">{parsedFeature.description}</span>
                   </div>
+                  {parsedFeature.assumptions && (
+                    <div className="col-span-3 border-t border-slate-200/60 pt-2">
+                      <span className="text-[9px] uppercase font-bold text-amber-600 block">Assumptions / Pre-conditions</span>
+                      <span className="text-slate-700 text-[11px] block">{parsedFeature.assumptions}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Input fields */}
                 <div className="space-y-1.5">
                   <span className="font-bold text-slate-800 block">Parsed Input Parameters ({parsedFeature.input_fields.length})</span>
                   {parsedFeature.input_fields.length > 0 ? (
-                    <div className="overflow-hidden border border-slate-100 rounded-lg">
+                    <div className="overflow-x-auto border border-slate-100 rounded-lg">
                       <table className="min-w-full divide-y divide-slate-100 text-[11px] text-left">
                         <thead className="bg-slate-50 text-slate-400 font-bold uppercase text-[9px]">
                           <tr>
                             <th className="px-3 py-2">Name</th>
                             <th className="px-3 py-2">Type</th>
-                            <th className="px-3 py-2">Required</th>
+                            <th className="px-3 py-2">Req</th>
                             <th className="px-3 py-2">Constraints</th>
+                            <th className="px-3 py-2">Validation</th>
+                            <th className="px-3 py-2">Description</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white font-mono text-slate-600">
+                        <tbody className="divide-y divide-slate-100 bg-white font-mono text-slate-600 text-[10px]">
                           {parsedFeature.input_fields.map((f, i) => (
                             <tr key={i}>
                               <td className="px-3 py-1.5 text-slate-900 font-semibold">{f.name}</td>
                               <td className="px-3 py-1.5 text-blue-600">{f.type}</td>
                               <td className="px-3 py-1.5">
                                 {f.required ? (
-                                  <span className="text-rose-600 font-bold bg-rose-50 px-1 py-0.5 rounded text-[10px]">Yes</span>
+                                  <span className="text-rose-600 font-bold bg-rose-50 px-1 py-0.5 rounded text-[9px]">Yes</span>
                                 ) : (
                                   <span className="text-slate-400">No</span>
                                 )}
                               </td>
-                              <td className="px-3 py-1.5 truncate">
+                              <td className="px-3 py-1.5 truncate max-w-[120px]">
                                 {[
                                   f.min !== undefined ? `min: ${f.min}` : '',
                                   f.max !== undefined ? `max: ${f.max}` : '',
                                   f.format ? `format: ${f.format}` : ''
                                 ].filter(Boolean).join(', ') || <span className="text-slate-300">-</span>}
+                              </td>
+                              <td className="px-3 py-1.5 text-purple-600 truncate max-w-[100px]">
+                                {f.validation || <span className="text-slate-300">-</span>}
+                              </td>
+                              <td className="px-3 py-1.5 text-slate-500 font-sans truncate max-w-[160px]">
+                                {f.description || <span className="text-slate-300">-</span>}
                               </td>
                             </tr>
                           ))}
@@ -490,6 +529,20 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
                   ) : (
                     <div className="p-2.5 bg-slate-50 border border-slate-100 text-slate-400 italic rounded-lg text-[11px]">
                       No upstream software modules listed as dependencies.
+                    </div>
+                  )}
+                </div>
+
+                {/* Reference section */}
+                <div className="space-y-1.5">
+                  <span className="font-bold text-slate-800 block">Reference / Documentation Links</span>
+                  {parsedFeature.reference ? (
+                    <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-slate-600 text-[11px] leading-relaxed">
+                      {parsedFeature.reference}
+                    </div>
+                  ) : (
+                    <div className="p-2.5 bg-slate-50 border border-slate-100 text-slate-400 italic rounded-lg text-[11px]">
+                      No external references or documentation notes specified.
                     </div>
                   )}
                 </div>

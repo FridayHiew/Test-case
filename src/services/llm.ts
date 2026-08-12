@@ -2,22 +2,26 @@ import { AIConfig, Feature, TestResult, BaseCaseTemplate, E2ETestCase } from '..
 
 export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
   {
-    id: 'ai-light-business-logic',
-    title: 'Verify custom business workflows and E2E business constraints for "{feature_name}"',
-    type: 'positive',
+    id: 'input-field-validation-baseline',
+    title: 'Verify Input Parameter Specifications for "{field_name}"',
+    type: 'boundary',
     enabled: true,
     caseCount: 1,
     preconditions: [
       '{dependencies}',
-      'Ensure the active environment state satisfies general specifications.'
+      'Target input parameter "{field_name}" (type: {field_type}) is rendered and interactable.',
+      'Field Purpose Reasoning: {field_description}'
     ],
     steps: [
-      '1. Initialize the workflow interface for "{feature_name}".',
-      '2. Submit inputs adhering to the custom business rules and functional constraints: {business_rules}.',
-      '3. Verify that the state outputs successfully map to: {output_names}.'
+      '1. Focus input parameter "{field_name}".',
+      '2. Requiredness Check: Test empty submission behavior (Mandatory vs Optional).',
+      '3. Data Type Compliance: Attempt mismatched values against data type "{field_type}".',
+      '4. Boundary Limits Verification: Test min/max range limits, lengths, and format constraints.',
+      '5. Custom Constraint Compliance: Verify custom validation rules if specified.',
+      '6. Functional Reasoning: Verify behavior matches described parameter purpose.'
     ],
-    expected: 'The application computes the target output values exactly as specified by the business rules and updates the system state.',
-    aiPrompt: 'Focus on verifying end-to-end integration flows and complex state transitions across system components.'
+    expected: 'System strictly validates input parameter "{field_name}", enforcing type safety, boundary limits, required constraints, custom validation rules, and description reasoning.',
+    aiPrompt: 'Validate edge case parameter values, special character sanitization, and boundary limits for this input field.'
   },
   {
     id: 'business-rule-baseline',
@@ -36,6 +40,24 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     ],
     expected: 'System correctly evaluates and enforces business rule "{rule}", preserving data integrity and state transition rules.',
     aiPrompt: 'Include specific edge case validations and boundary conditions associated with this business rule.'
+  },
+  {
+    id: 'ai-light-business-logic',
+    title: 'Verify custom business workflows and E2E business constraints for "{feature_name}"',
+    type: 'positive',
+    enabled: true,
+    caseCount: 1,
+    preconditions: [
+      '{dependencies}',
+      'Ensure the active environment state satisfies general specifications.'
+    ],
+    steps: [
+      '1. Initialize the workflow interface for "{feature_name}".',
+      '2. Submit inputs adhering to the custom business rules and functional constraints: {business_rules}.',
+      '3. Verify that the state outputs successfully map to: {output_names}.'
+    ],
+    expected: 'The application computes the target output values exactly as specified by the business rules and updates the system state.',
+    aiPrompt: 'Focus on verifying end-to-end integration flows and complex state transitions across system components.'
   }
 ];
 

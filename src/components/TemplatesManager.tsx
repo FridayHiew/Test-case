@@ -282,6 +282,10 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
             <span className="font-bold text-purple-700"><code>{`{rule}`}</code></span>
             <span className="text-slate-500 text-[10px]">Replaced with the individual target business rule text</span>
           </div>
+          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex flex-col space-y-1">
+            <span className="font-bold text-emerald-700"><code>{`{field_name}`}</code></span>
+            <span className="text-slate-500 text-[10px]">Replaced with individual target input field name</span>
+          </div>
         </div>
       </div>
 
