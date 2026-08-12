@@ -1,0 +1,6 @@
+{
+  "name": "AI Test Case Generator",
+  "description": "An advanced PWA-based AI Test Case Generation System supporting dual-channel toggles between local offline models (Ollama) and cloud APIs, with IndexedDB persistence, cache pre-warming, and offline capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,22 @@
+{
+  "short_name": "AI TestGen",
+  "name": "AI Test Case Generator",
+  "description": "An advanced PWA-based AI Test Case Generation System",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "./icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "./",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "display": "standalone",
+  "orientation": "portrait"
+}
