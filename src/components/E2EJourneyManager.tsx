@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { E2EJourney, E2ETestCase, Feature, AIConfig } from '../types';
 import { LLMClient } from '../services/llm';
 import { 
   GitFork, Play, FileText, Sparkles, Plus, Trash2, Edit3, Save, 
   X, Check, AlertTriangle, Eye, Code, HelpCircle, ArrowRight,
-  RefreshCw, CheckCircle2, ChevronRight, Terminal
+  RefreshCw, CheckCircle2, ChevronRight, Terminal, Upload, Download,
+  Folder, FolderOpen, Clipboard, Info, Layers, ListChecks, CheckSquare
 } from 'lucide-react';
 
 interface E2EJourneyManagerProps {
@@ -31,50 +32,17 @@ const DEFAULT_E2E_JOURNEYS: E2EJourney[] = [
         name: 'Happy-path Standard Settlement Flow',
         flowPath: 'LOGIN-001 ➡️ PAYMENT-001 ➡️ INVENTORY-002',
         preconditions: [
-          'User authentication subsystem is active.',
-          'Warehouse safety buffer inventory levels are normal (> 10 units).'
+          'User authenticated session token is valid and set in context.',
+          'Warehouse safety buffer stock levels for item_id "sku-8891" is normal (> 10 units).'
         ],
         steps: [
-          '1. Perform user login authentication at LOGIN-001 using valid credentials.',
-          '2. Securely carry forward session token to PAYMENT-001 escrow gateway.',
-          '3. Trigger standard checkout transaction under PAYMENT-001. System scores fraud pattern as low risk.',
-          '4. Directly pass transaction ID outputs to INVENTORY-002 and trigger stock level updates.'
+          '1. [LOGIN-001] Input username="e2e_auditor" and password="PassWord123!" into login fields and trigger verification.',
+          '2. [LOGIN-001] Capture jwt_token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" from output contract response.',
+          '3. [PAYMENT-001] Inject jwt_token in Authorization header. Send checkout payload with cartId="cart-f47ac10b", amount=149.99, and currency="USD".',
+          '4. [PAYMENT-001] Payment engine scores transaction as low risk. Capture settlement status="completed" and charge_id="chg_010203".',
+          '5. [INVENTORY-002] Pass charge_id to warehouse stock decrementor and confirm stock_level matches normal bounds.'
         ],
-        expected: 'User checkout completes. Multi-warehouse proximity allocation completes. Stock units are decremented cleanly without conflicts.'
-      },
-      {
-        id: 'E2E-TC-002',
-        name: 'Anomalous Transaction with Escalated MFA Verification Success',
-        flowPath: 'LOGIN-001 ➡️ PAYMENT-001 ➡️ MFA-001 ➡️ INVENTORY-002',
-        preconditions: [
-          '3D-Secure gateway trigger parameter is initialized.',
-          'Warehouse stock is locked row-level.'
-        ],
-        steps: [
-          '1. Log user in via LOGIN-001 and request a secure verification context.',
-          '2. Trigger checkout at PAYMENT-001 with anomalous telemetry coordinates to stimulate a high risk score.',
-          '3. Intercept execution and dispatch high-risk payload to MFA-001 challenge page.',
-          '4. Input valid multi-factor verification code. Complete MFA validation sequence successfully.',
-          '5. Direct state machine to authorize INVENTORY-002 stock reconciliation.'
-        ],
-        expected: 'Transaction is verified after second-factor authentication. Escrow funds are routed to schedules, and stock levels are synchronized.'
-      },
-      {
-        id: 'E2E-TC-003',
-        name: 'High-Risk Payment Multi-Factor Verification Rejection and Lockout',
-        flowPath: 'LOGIN-001 ➡️ PAYMENT-001 ➡️ MFA-001 ➡️ FRAUD-999',
-        preconditions: [
-          'MFA thresholds set to maximum security strictness.',
-          'Fraud reporting telemetry sinks are listening.'
-        ],
-        steps: [
-          '1. Log user in via LOGIN-001.',
-          '2. Dispatch high-risk transaction parameters to PAYMENT-001.',
-          '3. Trigger 3D-Secure verification on MFA-001.',
-          '4. Simulate dynamic verification failure (timeout/incorrect code inputs).',
-          '5. Intercept checkout workflow and isolate user account into FRAUD-999 lockout state.'
-        ],
-        expected: 'Transaction is immediately aborted. Account state is flagged as suspicious. Fraud audit logs are generated and warehouse stock remains unaffected.'
+        expected: 'Expected outputs: paymentIntentId="tx_889122", totalCharged=149.99, status="success", and stock levels are decremented by exactly 1 unit.'
       }
     ]
   }
@@ -100,6 +68,13 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
   const [viewMode, setViewMode] = useState<'visual' | 'code'>('visual');
   const [activeTestCaseId, setActiveTestCaseId] = useState<string | null>(null);
 
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState('');
+
+  const [copiedStepIdx, setCopiedStepIdx] = useState<number | null>(null);
+  const [copiedSuccess, setCopiedSuccess] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const currentJourney = journeys.find(j => j.id === selectedJourneyId);
 
   useEffect(() => {
@@ -113,7 +88,7 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
     } else {
       setActiveTestCaseId(null);
     }
-  }, [selectedJourneyId]);
+  }, [selectedJourneyId, journeys]);
 
   const handleStartEdit = () => {
     if (!currentJourney) return;
@@ -158,7 +133,8 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
     setEditMermaid(newJourney.mermaidFlowchart);
   };
 
-  const handleDeleteJourney = (id: string) => {
+  const handleDeleteJourney = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (journeys.length <= 1) {
       alert('You must retain at least one E2E journey pipeline.');
       return;
@@ -168,7 +144,100 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
     setSelectedJourneyId(updated[0].id);
   };
 
-  // Compile / Generate smart E2E test cases (exactly 1 per path analyzed by LLM)
+  const handleStartRename = (id: string, currentName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenameId(id);
+    setRenameVal(currentName);
+  };
+
+  const handleSaveRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!renameId || !renameVal.trim()) return;
+    const updated = journeys.map(j => {
+      if (j.id === renameId) {
+        return { ...j, name: renameVal.trim() };
+      }
+      return j;
+    });
+    setJourneys(updated);
+    setRenameId(null);
+  };
+
+  // Export current selected E2E Journey as JSON
+  const handleExportJourney = (journey: E2EJourney) => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(journey, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    const sanitizedName = journey.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    downloadAnchor.setAttribute("download", `${sanitizedName}-e2e-journey.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Export ALL E2E Journeys as JSON
+  const handleExportAllJourneys = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(journeys, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `all-saved-e2e-journeys.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Import E2E Journey JSON
+  const handleImportJourney = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const fileContent = event.target?.result as string;
+        const parsed = JSON.parse(fileContent);
+
+        let importedJourneys: E2EJourney[] = [];
+        if (Array.isArray(parsed)) {
+          // If it is an array of journeys
+          importedJourneys = parsed.map(j => ({
+            ...j,
+            id: j.id || `journey-imported-${Date.now()}-${Math.random()}`
+          }));
+        } else if (parsed && typeof parsed === 'object' && parsed.mermaidFlowchart) {
+          // If it is a single journey
+          importedJourneys = [{
+            ...parsed,
+            id: parsed.id || `journey-imported-${Date.now()}`
+          }];
+        } else {
+          throw new Error('Invalid format. File must contain a mermaidFlowchart key or be a list of journeys.');
+        }
+
+        // Merge with existing journeys (prevent duplicate IDs)
+        const updated = [...journeys];
+        importedJourneys.forEach(imported => {
+          const index = updated.findIndex(existing => existing.id === imported.id);
+          if (index !== -1) {
+            updated[index] = imported;
+          } else {
+            updated.push(imported);
+          }
+        });
+
+        setJourneys(updated);
+        setSelectedJourneyId(importedJourneys[0].id);
+        alert(`Successfully imported ${importedJourneys.length} E2E Journey file(s).`);
+      } catch (err: any) {
+        alert(`Failed to import JSON file: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset input
+  };
+
+  // Compile / Generate smart concrete E2E test cases
   const handleGenerateE2ECases = async () => {
     if (!currentJourney) return;
     setIsGenerating(true);
@@ -203,7 +272,19 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
     }
   };
 
-  // Bespoke Flowchart Parsing & Node Grid Placement Visualizer
+  const copyStepText = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedStepIdx(idx);
+    setTimeout(() => setCopiedStepIdx(null), 1500);
+  };
+
+  const copyAllTestCase = (tc: E2ETestCase) => {
+    const content = `Test Case: ${tc.name}\nFlow: ${tc.flowPath}\n\nPreconditions:\n${tc.preconditions.map(p => `- ${p}`).join('\n')}\n\nSteps:\n${tc.steps.map(s => s).join('\n')}\n\nExpected Outcomes:\n${tc.expected}`;
+    navigator.clipboard.writeText(content);
+    setCopiedSuccess(true);
+    setTimeout(() => setCopiedSuccess(false), 2000);
+  };
+
   // Parses basic Mermaid "graph TD" or "graph LR" lines
   const parseMermaidToVisualNodes = (mermaidText: string) => {
     const nodes: Array<{ id: string; label: string; subText?: string }> = [];
@@ -288,7 +369,7 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
   return (
     <div className="space-y-6">
       {/* Primary Header Section */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-6 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="space-y-1">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
@@ -297,90 +378,232 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
             <h2 className="text-lg font-semibold text-slate-900">Mermaid E2E Journey Manager</h2>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 max-w-3xl">
-            Design complete end-to-end user lifecycles using structured Mermaid text graphs. The system automatically parses each execution branch to generate <strong>exactly 1 highly robust E2E test case per path</strong>.
+            Design complete end-to-end user lifecycles. Generate **detailed, highly concrete test cases** complete with mock test parameters, explicit API steps, and system outcome contracts.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={selectedJourneyId}
-            onChange={(e) => setSelectedJourneyId(e.target.value)}
-            className="px-3.5 py-2 text-xs font-semibold bg-white border border-slate-200 rounded-xl text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
+        <div className="flex items-center space-x-2">
+          {/* Hidden Import file input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImportJourney}
+            accept=".json"
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition shadow-xs"
+            title="Import JSON Journey file"
           >
-            {journeys.map(j => (
-              <option key={j.id} value={j.id}>{j.name.substring(0, 42)}...</option>
-            ))}
-          </select>
+            <Upload className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+            Import File
+          </button>
 
           <button
             type="button"
-            onClick={handleAddJourney}
-            className="inline-flex items-center px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-bold rounded-xl transition shadow-sm"
+            onClick={handleExportAllJourneys}
+            className="inline-flex items-center px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition shadow-xs"
+            title="Export all journeys as .json archive"
           >
-            <Plus className="w-4 h-4 mr-1.5" />
-            Create Journey Pipeline
+            <Download className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+            Export Archive
           </button>
         </div>
       </div>
 
-      {/* Workspace Split Layout */}
+      {/* Workspace Split Layout: 3-Columns on Desktop */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* Left Side: Journey Details, Live Graph, and Code Editor */}
-        <div className="lg:col-span-7 space-y-6">
+        {/* COLUMN 1: E2E Journey Repository Browser (File Manager Concept) */}
+        <div className="lg:col-span-3 space-y-4">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4.5 flex flex-col h-full min-h-[450px]">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center">
+                <FolderOpen className="w-3.5 h-3.5 mr-1.5 text-indigo-500" />
+                Journey Repository
+              </span>
+              <button
+                type="button"
+                onClick={handleAddJourney}
+                className="p-1 hover:bg-indigo-50 rounded text-indigo-600 transition"
+                title="Create New E2E File"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* List of Journeys (Styled as files) */}
+            <div className="space-y-1.5 flex-1 overflow-y-auto max-h-[380px] pr-1">
+              {journeys.map(j => {
+                const isSelected = j.id === selectedJourneyId;
+                const isRenaming = renameId === j.id;
+
+                return (
+                  <div
+                    key={j.id}
+                    onClick={() => {
+                      if (!isRenaming) setSelectedJourneyId(j.id);
+                    }}
+                    className={`group w-full p-2.5 rounded-xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
+                      isSelected 
+                        ? 'bg-indigo-50/50 border-indigo-200 ring-1 ring-indigo-150/40' 
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-start space-x-2.5">
+                      <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+                        isSelected ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-500 group-hover:bg-slate-100'
+                      }`}>
+                        <FileText className="w-3.5 h-3.5" />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        {isRenaming ? (
+                          <div className="flex items-center space-x-1.5 mt-0.5" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={renameVal}
+                              onChange={(e) => setRenameVal(e.target.value)}
+                              className="w-full px-2 py-1 border border-indigo-300 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none font-semibold text-slate-800"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSaveRename}
+                              className="p-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded"
+                            >
+                              <Check className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRenameId(null);
+                              }}
+                              className="p-1 bg-slate-50 text-slate-500 hover:bg-slate-100 rounded"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <span className="text-xs font-bold text-slate-800 block truncate leading-tight group-hover:text-indigo-900 transition">
+                              {j.name}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-bold block font-mono">
+                              {j.testCases?.length || 0} smart cases • {j.mermaidFlowchart.split('\n').filter(l => l.includes('-->')).length} links
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action Hover Controls */}
+                    {!isRenaming && (
+                      <div className="flex items-center justify-end space-x-1 border-t border-slate-100 mt-2.5 pt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={(e) => handleStartRename(j.id, j.name, e)}
+                          className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded transition text-[10px] font-bold inline-flex items-center"
+                          title="Rename E2E File"
+                        >
+                          <Edit3 className="w-3 h-3 mr-0.5" />
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleExportJourney(j);
+                          }}
+                          className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded transition text-[10px] font-bold inline-flex items-center"
+                          title="Export Single JSON File"
+                        >
+                          <Download className="w-3 h-3 mr-0.5" />
+                          Export
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteJourney(j.id, e)}
+                          className="p-1 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded transition text-[10px] font-bold inline-flex items-center"
+                          title="Delete Journey file"
+                        >
+                          <Trash2 className="w-3 h-3 mr-0.5" />
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-150 bg-slate-50/50 p-2.5 rounded-xl border text-[10px] text-slate-500 leading-normal flex items-start space-x-2">
+              <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+              <span>
+                Select your E2E Journey file block to inspect its interactive transition map, edit its underlying flow code, or generate detailed test files.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* COLUMN 2: Flowchart Map Visualizer & Mermaid Editor */}
+        <div className="lg:col-span-5 space-y-6">
           <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-5 space-y-4">
             
             {/* Toggle Editor vs Viewer */}
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Operational Graph</span>
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Operational Map</span>
                 {isEditing && (
-                  <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  <span className="bg-amber-100 text-amber-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wide">
                     Editing Mode
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center space-x-1.5">
+              <div className="flex items-center space-x-1">
                 <button
                   type="button"
                   onClick={() => setViewMode('visual')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center transition ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center transition ${
                     viewMode === 'visual' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Eye className="w-3.5 h-3.5 mr-1" />
-                  Live Map View
+                  Live View
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode('code')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center transition ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center transition ${
                     viewMode === 'code' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Code className="w-3.5 h-3.5 mr-1" />
-                  Edit Mermaid Code
+                  Code
                 </button>
 
-                <div className="w-px h-5 bg-slate-200 mx-2" />
+                <div className="w-px h-4 bg-slate-200 mx-1.5" />
 
                 {isEditing ? (
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-1">
                     <button
                       type="button"
                       onClick={() => setIsEditing(false)}
-                      className="p-1.5 hover:bg-slate-100 text-slate-500 rounded-lg transition"
+                      className="p-1 hover:bg-slate-100 text-slate-500 rounded transition"
                       title="Cancel"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                     <button
                       type="button"
                       onClick={handleSaveJourney}
-                      className="inline-flex items-center px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition shadow-sm"
+                      className="inline-flex items-center px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded transition shadow-sm"
                     >
-                      <Save className="w-3.5 h-3.5 mr-1" />
+                      <Save className="w-3 h-3 mr-1" />
                       Save
                     </button>
                   </div>
@@ -388,10 +611,10 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
                   <button
                     type="button"
                     onClick={handleStartEdit}
-                    className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition"
-                    title="Edit Title & Flowchart"
+                    className="p-1 hover:bg-slate-100 text-slate-600 rounded transition"
+                    title="Edit Metadata & Flowchart"
                   >
-                    <Edit3 className="w-4 h-4" />
+                    <Edit3 className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
@@ -404,7 +627,7 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
                   placeholder="Journey Name..."
                 />
                 <textarea
@@ -417,64 +640,63 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
               </div>
             ) : (
               <div className="space-y-1.5">
-                <h3 className="font-bold text-slate-800 text-base leading-snug">{currentJourney.name}</h3>
+                <h3 className="font-bold text-slate-800 text-sm leading-snug">{currentJourney.name}</h3>
                 <p className="text-xs text-slate-500 leading-relaxed">{currentJourney.description}</p>
               </div>
             )}
 
             {/* Visual Graph View Mode */}
             {viewMode === 'visual' ? (
-              <div className="border border-slate-150 rounded-xl bg-slate-50/50 p-6 flex flex-col items-center justify-center min-h-[360px] relative overflow-hidden">
-                <div className="absolute top-3 left-3 flex items-center space-x-1.5 text-[10px] text-slate-400 font-bold bg-white/80 py-1 px-2.5 rounded-lg border border-slate-100 shadow-xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Interactive Flowpath Highlights Active</span>
+              <div className="border border-slate-150 rounded-xl bg-slate-50/50 p-5 flex flex-col items-center justify-center min-h-[350px] relative overflow-hidden">
+                <div className="absolute top-2.5 left-2.5 flex items-center space-x-1 text-[9px] text-slate-400 font-bold bg-white/85 py-1 px-2.5 rounded-lg border border-slate-100 shadow-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Highlight Traces Active</span>
                 </div>
 
                 {/* Styled Bespoke Graph Visualizer */}
-                <div className="w-full space-y-6 pt-4 max-w-md">
+                <div className="w-full space-y-4 pt-3 max-w-sm">
                   {visualData.nodes.map((node, index) => {
                     const isActive = isNodeActiveInPath(node.id);
                     const outgoingLinks = visualData.edges.filter(e => e.source === node.id);
 
                     return (
-                      <div key={node.id} className="space-y-4">
+                      <div key={node.id} className="space-y-3">
                         {/* Render Node card */}
-                        <div className={`p-4 rounded-xl border-2 transition-all flex items-start space-x-3.5 shadow-sm ${
+                        <div className={`p-3.5 rounded-xl border-2 transition-all flex items-start space-x-3 shadow-sm ${
                           isActive 
-                            ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-50 scale-102 translate-x-1' 
+                            ? 'bg-emerald-50/80 border-emerald-500 ring-1 ring-emerald-100 scale-102 translate-x-0.5' 
                             : 'bg-white border-slate-200 hover:border-slate-300'
                         }`}>
-                          <div className={`p-2 rounded-lg font-mono text-xs font-bold ${
+                          <div className={`p-1.5 rounded text-[10px] font-mono font-bold shrink-0 ${
                             isActive ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-700'
                           }`}>
                             {index + 1}
                           </div>
-                          <div className="space-y-0.5">
-                            <span className="text-xs font-bold text-slate-400 font-mono tracking-wider block uppercase">{node.id}</span>
-                            <h4 className="text-xs font-extrabold text-slate-800 leading-tight">{node.label}</h4>
-                            {node.subText && <p className="text-[10px] text-slate-500 leading-relaxed pt-0.5">{node.subText}</p>}
+                          <div className="space-y-0.5 min-w-0">
+                            <span className="text-[9px] font-bold text-slate-400 font-mono tracking-wider block uppercase">{node.id}</span>
+                            <h4 className="text-xs font-extrabold text-slate-800 leading-tight truncate">{node.label}</h4>
+                            {node.subText && <p className="text-[10px] text-slate-500 leading-tight pt-0.5">{node.subText}</p>}
                           </div>
                         </div>
 
                         {/* Render links underneath the card */}
                         {outgoingLinks.length > 0 && (
-                          <div className="pl-8 space-y-3">
+                          <div className="pl-6 space-y-2">
                             {outgoingLinks.map((link, lIdx) => {
                               const linkActive = isEdgeActiveInPath(link.source, link.target);
                               return (
-                                <div key={lIdx} className="flex items-center space-x-2 text-[11px]">
-                                  {/* Styled Custom Edge Arrow */}
+                                <div key={lIdx} className="flex items-center space-x-2 text-[10px]">
                                   <div className="flex flex-col items-center">
-                                    <div className={`w-0.5 h-6 transition-colors ${
+                                    <div className={`w-0.5 h-5 transition-colors ${
                                       linkActive ? 'bg-emerald-500' : 'bg-slate-200'
                                     }`} />
-                                    <ArrowRight className={`w-3.5 h-3.5 rotate-90 transition-colors -mt-1 ${
+                                    <ArrowRight className={`w-3 h-3 rotate-90 transition-colors -mt-1 ${
                                       linkActive ? 'text-emerald-500' : 'text-slate-350'
                                     }`} />
                                   </div>
 
                                   {link.label && (
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition ${
                                       linkActive 
                                         ? 'bg-emerald-100/60 text-emerald-800 border-emerald-200' 
                                         : 'bg-slate-100 text-slate-500 border-slate-150'
@@ -482,7 +704,7 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
                                       {link.label}
                                     </span>
                                   )}
-                                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
+                                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider font-mono">
                                     to {link.target}
                                   </span>
                                 </div>
@@ -498,9 +720,9 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
             ) : (
               /* Code Editor Mode */
               <div className="space-y-3">
-                <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  <span>Standard Mermaid Graph Language</span>
-                  <span className="font-mono text-slate-300">[graph TD / graph LR supported]</span>
+                <div className="flex justify-between items-center text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                  <span>Standard Mermaid Flowchart Language</span>
+                  <span className="font-mono text-slate-300">[graph TD / LR supported]</span>
                 </div>
                 <textarea
                   value={isEditing ? editMermaid : currentJourney.mermaidFlowchart}
@@ -508,20 +730,19 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
                     if (isEditing) {
                       setEditMermaid(e.target.value);
                     } else {
-                      // Trigger edit automatically
                       handleStartEdit();
                       setEditMermaid(e.target.value);
                     }
                   }}
                   rows={8}
-                  className="w-full p-4 border border-slate-200 bg-slate-900 text-slate-100 rounded-xl font-mono text-[11px] leading-relaxed focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full p-3.5 border border-slate-200 bg-slate-900 text-slate-100 rounded-xl font-mono text-[10px] leading-relaxed focus:ring-2 focus:ring-indigo-500 outline-none"
                   placeholder="graph TD&#10;    A[LOGIN-001: Auth Portal] --> B[PAYMENT-001: Payout]"
                 />
-                <div className="bg-slate-50 rounded-lg p-3.5 text-[11px] text-slate-500 flex items-start space-x-2">
-                  <HelpCircle className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                <div className="bg-slate-50 rounded-lg p-3 text-[11px] text-slate-500 flex items-start space-x-2">
+                  <HelpCircle className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
                   <div>
                     <span className="font-semibold block text-slate-700 mb-0.5">Quick Syntax Helper</span>
-                    To create nodes with descriptive subtitles, use the bracket syntax: <code>NodeID[Short Label: Detailed Description Subtitle]</code>.
+                    Declare links with tags: <code>A --&gt;|Token Granted| B</code>. Use colon dividers to write details: <code>A[LOGIN-001: Security Portal]</code>.
                   </div>
                 </div>
               </div>
@@ -530,7 +751,7 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
             {/* Smart Analyzer Action Control */}
             <div className="border-t border-slate-100 pt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div className="flex items-center space-x-2 text-xs text-slate-400 font-bold">
-                <GitFork className="w-4 h-4 text-slate-400" />
+                <GitFork className="w-3.5 h-3.5 text-slate-400" />
                 <span>Detected Paths: {visualData.edges.length || 1} Branches</span>
               </div>
 
@@ -538,24 +759,24 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
                 type="button"
                 onClick={handleGenerateE2ECases}
                 disabled={isGenerating}
-                className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-350 text-white text-xs font-bold rounded-xl transition shadow-md shadow-indigo-100"
+                className="w-full sm:w-auto inline-flex items-center justify-center px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-350 text-white text-xs font-bold rounded-xl transition shadow-md shadow-indigo-100"
               >
                 {isGenerating ? (
                   <>
-                    <RefreshCw className="w-3.5 h-3.5 mr-2 animate-spin" />
-                    Analyzing Flowpaths & Compiling E2E Suite...
+                    <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    Generating E2E Suites...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5 mr-2" />
-                    Compile 1 Test Case Per Flow Path
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                    Compile Concrete Test Cases
                   </>
                 )}
               </button>
             </div>
 
             {generationError && (
-              <div className="p-3.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 text-xs flex items-start space-x-2">
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 text-xs flex items-start space-x-2">
                 <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                 <span>{generationError}</span>
               </div>
@@ -563,16 +784,16 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
           </div>
         </div>
 
-        {/* Right Side: Generated E2E Test Cases Display */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-5 space-y-4 min-h-[460px] flex flex-col">
+        {/* COLUMN 3: Highly Concrete, "Normal-Style" Test Cases Display */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-5 space-y-4 min-h-[450px] flex flex-col">
             <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
               <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
                 <CheckCircle2 className="w-4 h-4 mr-1.5 text-indigo-500" />
-                Active E2E Test Case Suite
+                E2E Test Suites
               </h3>
-              <span className="bg-indigo-50 text-indigo-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded-md border border-indigo-100">
-                {currentJourney.testCases?.length || 0} Cases
+              <span className="bg-indigo-50 text-indigo-700 font-mono text-[9px] font-bold px-2 py-0.5 rounded border border-indigo-100">
+                {currentJourney.testCases?.length || 0} Saved
               </span>
             </div>
 
@@ -580,7 +801,7 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
               <div className="flex-1 flex flex-col space-y-4">
                 
                 {/* Compact Accordion Tabs */}
-                <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-1 gap-1.5">
                   {currentJourney.testCases.map((tc) => {
                     const isActive = activeTestCaseId === tc.id;
                     return (
@@ -588,39 +809,63 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
                         key={tc.id}
                         type="button"
                         onClick={() => setActiveTestCaseId(tc.id)}
-                        className={`text-left p-3 rounded-xl border transition-all flex items-center justify-between ${
+                        className={`text-left p-2.5 rounded-xl border transition-all flex items-center justify-between ${
                           isActive 
                             ? 'bg-indigo-50/50 border-indigo-200 ring-1 ring-indigo-100/50' 
                             : 'bg-slate-50/40 border-slate-150 hover:bg-slate-50'
                         }`}
                       >
                         <div className="space-y-0.5 truncate mr-2">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded font-mono">
+                          <div className="flex items-center space-x-1.5">
+                            <span className="text-[9px] font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1 py-0.5 rounded font-mono">
                               {tc.id}
                             </span>
-                            <span className="text-[10px] text-slate-400 font-bold uppercase font-mono tracking-wider">
-                              Path Coverage Test Case
+                            <span className="text-[9px] text-slate-400 font-bold uppercase font-mono tracking-wider">
+                              Branch Path
                             </span>
                           </div>
-                          <span className="text-xs font-bold text-slate-800 leading-tight block truncate">
+                          <span className="text-[11px] font-bold text-slate-800 leading-snug block truncate">
                             {tc.name}
                           </span>
                         </div>
-                        <ChevronRight className={`w-4 h-4 transition ${isActive ? 'text-indigo-600 translate-x-0.5' : 'text-slate-350'}`} />
+                        <ChevronRight className={`w-3.5 h-3.5 transition ${isActive ? 'text-indigo-600 translate-x-0.5' : 'text-slate-300'}`} />
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Detail View of selected test case */}
+                {/* Detail View of selected test case: Highly Detailed, Granular "Normal-Style" Test Case Render */}
                 {activeTestCase && (
-                  <div className="flex-1 bg-slate-50/50 border border-slate-150 rounded-xl p-4.5 space-y-4 text-xs">
+                  <div className="flex-1 bg-slate-50/50 border border-slate-150 rounded-xl p-4 space-y-4 text-[11px]">
                     
-                    {/* Path mapping header */}
+                    {/* Copy All Button */}
+                    <div className="flex justify-between items-center border-b border-slate-150 pb-2">
+                      <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">
+                        Granular Case Specifications
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyAllTestCase(activeTestCase)}
+                        className="inline-flex items-center text-indigo-600 hover:text-indigo-700 font-bold text-[10px]"
+                      >
+                        {copiedSuccess ? (
+                          <>
+                            <Check className="w-3 h-3 mr-1 text-emerald-500" />
+                            Copied Spec!
+                          </>
+                        ) : (
+                          <>
+                            <Clipboard className="w-3 h-3 mr-1" />
+                            Copy Full Spec
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Path mapping trace */}
                     <div className="space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">E2E Operational Flow Path</span>
-                      <div className="p-2.5 bg-white border border-slate-150 rounded-lg flex items-center space-x-2 font-mono text-[10px] font-bold text-indigo-700 shadow-xs overflow-x-auto whitespace-nowrap">
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider font-sans">Trace flow Path</span>
+                      <div className="p-2 bg-white border border-slate-150 rounded-lg flex items-center space-x-1.5 font-mono text-[9px] font-bold text-indigo-700 shadow-xs overflow-x-auto whitespace-nowrap">
                         <Terminal className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                         <span>{activeTestCase.flowPath}</span>
                       </div>
@@ -628,29 +873,60 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
 
                     {/* Preconditions */}
                     <div className="space-y-1.5">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Preconditions</span>
-                      <ul className="list-disc pl-4 space-y-1 text-slate-600 leading-relaxed font-semibold">
-                        {activeTestCase.preconditions.map((p, idx) => <li key={idx}>{p}</li>)}
-                      </ul>
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Preconditions & Initial State</span>
+                      <div className="bg-white p-2.5 rounded-lg border border-slate-150 space-y-1.5 shadow-xs">
+                        {activeTestCase.preconditions.map((p, idx) => (
+                          <div key={idx} className="flex items-start space-x-2 text-slate-700 leading-normal font-semibold">
+                            <CheckSquare className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                            <span>{p}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
-                    {/* Chronological Steps */}
+                    {/* Chronological Action-by-Action Steps with parameters */}
                     <div className="space-y-1.5">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Chronological Trace Steps</span>
-                      <div className="bg-white p-3.5 rounded-lg border border-slate-150 space-y-2.5 shadow-xs">
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Detailed Execution steps (Normal-Style)</span>
+                      <div className="space-y-2">
                         {activeTestCase.steps.map((step, idx) => (
-                          <div key={idx} className="flex items-start space-x-2 text-slate-700 leading-normal font-semibold">
-                            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-1.5 shrink-0" />
-                            <span>{step.replace(/^\d+\.\s*/, '')}</span>
+                          <div key={idx} className="bg-white p-2.5 rounded-lg border border-slate-150 shadow-xs space-y-1 relative group/step">
+                            <button
+                              type="button"
+                              onClick={() => copyStepText(step, idx)}
+                              className="absolute top-2 right-2 opacity-0 group-hover/step:opacity-100 p-0.5 hover:bg-slate-50 text-slate-400 hover:text-slate-600 rounded transition"
+                              title="Copy Step Text"
+                            >
+                              {copiedStepIdx === idx ? (
+                                <Check className="w-3 h-3 text-emerald-500" />
+                              ) : (
+                                <Clipboard className="w-3 h-3" />
+                              )}
+                            </button>
+                            
+                            <div className="flex items-center space-x-1 text-[9px] font-extrabold font-mono text-slate-400 uppercase">
+                              <span className="bg-slate-100 text-slate-700 px-1 py-0.5 rounded">STEP {idx + 1}</span>
+                              {step.includes('[') && (
+                                <span className="text-indigo-600">
+                                  {step.match(/\[(.*?)\]/)?.[0] || 'Feature'}
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-slate-700 font-semibold leading-relaxed pr-6">
+                              {step.replace(/^\d+\.\s*|\[.*?\]\s*/g, '')}
+                            </p>
                           </div>
                         ))}
                       </div>
                     </div>
 
                     {/* Unified Expected Outcome */}
-                    <div className="space-y-1 bg-indigo-50/40 p-3 rounded-lg border border-indigo-50">
-                      <span className="text-[10px] uppercase font-bold text-indigo-600 block tracking-wider">Unified Expected Result</span>
-                      <span className="text-slate-800 leading-relaxed block font-semibold">{activeTestCase.expected}</span>
+                    <div className="space-y-1 bg-indigo-50/50 p-3 rounded-lg border border-indigo-100/60">
+                      <span className="text-[9px] uppercase font-bold text-indigo-600 block tracking-wider flex items-center">
+                        <ListChecks className="w-3.5 h-3.5 mr-1 text-indigo-500" />
+                        Expected Outcome Contracts & Assertions
+                      </span>
+                      <p className="text-slate-800 leading-relaxed font-bold text-xs">{activeTestCase.expected}</p>
                     </div>
 
                   </div>
@@ -658,11 +934,11 @@ export default function E2EJourneyManager({ config, llmClient, features, active 
 
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/30">
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/30">
                 <GitFork className="w-8 h-8 text-slate-350 mb-2.5" />
-                <span className="text-xs font-bold text-slate-700 block">No E2E cases generated yet</span>
-                <p className="text-[11px] text-slate-400 max-w-xs mt-1">
-                  Click the <strong>Analyze Flowpaths</strong> button to trigger Gemini to trace this Mermaid flowchart and generate exactly 1 E2E test case per path.
+                <span className="text-xs font-bold text-slate-700 block">No concrete E2E test cases compiled</span>
+                <p className="text-[10px] text-slate-400 max-w-xs mt-1">
+                  Click <strong>Compile Concrete Test Cases</strong> to have Gemini trace your flowchart and design a high-fidelity test checklist.
                 </p>
               </div>
             )}

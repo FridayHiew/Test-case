@@ -140,16 +140,25 @@ ${JSON.stringify(features || [], null, 2)}
 
 TASK:
 1. Parse the Mermaid flowchart text. Trace and identify the major unique flow paths/execution sequences from start to finish.
-2. Generate EXACTLY one highly detailed, smart, fully descriptive E2E test case for EACH distinct flow path.
-3. For each E2E test case, provide:
+2. Generate EXACTLY one highly detailed, granular, fully descriptive E2E test case for EACH distinct flow path.
+3. Every E2E test case MUST be written like a professional, concrete test case:
+   - NO VAGUE GENERALIZATIONS: Do not say "Perform login at LOGIN-001" or "carry forward token".
+   - CONCRETE TEST DATA: Provide exact, realistic mock values for every single input field mentioned in the features. E.g., user_id='usr-9021', username='e2e_auditor', order_id='f47ac10b-58cc-4372-a567-0e02b2c3d479', amount=149.99, currency='USD', risk_fingerprint='7bc56c12d2bf40d348a28e9cfb3e10ab', safety_buffer_units=5, etc.
+   - DETAILED TEST STEPS: Break down each transition step-by-step. For each step, explicitly mention:
+     * The target feature ID (e.g., [LOGIN-001] or [PAYMENT-001])
+     * The specific input fields being filled and their exact test values
+     * The action triggered (e.g. "Post JSON payload to authentication router")
+     * The exact output parameters captured for the next transition
+   - EXPLICIT EXPECTATIONS: For each step and the final outcome, describe the precise output contract keys and expected values (e.g., "Expected output status='updated', charge_status='completed', escrow_release_epoch=1700000000").
+4. For each E2E test case, provide:
    - id: Unique path ID (e.g. "E2E-TC-001", "E2E-TC-002")
    - name: A descriptive name of the specific branch path (e.g. "Happy-path Standard Checkout", "Escrow Hold Trigger and Fraud Intercept")
    - flowPath: Synthesized transition sequence representation (e.g., "LOGIN-001 -> CART-001 -> PAYMENT-001")
    - preconditions: Unified setups, mock variables, and state requirements needed before starting the sequence.
-   - steps: Seamless chronological step-by-step user and system actions linking the entire sequence of nodes.
-   - expected: Comprehensive final system state, ledger updates, and UI confirmations.
+   - steps: Highly concrete, sequential action-by-action steps detailing inputs, mock values, API endpoints, payload properties, and handoffs.
+   - expected: Comprehensive final system state, exact output schemas, database assertions, and UI confirmations.
 
-Ensure that each flow path represents exactly 1 coherent, high-quality test case.
+Ensure that each flow path represents exactly 1 coherent, high-quality, professional-grade test case.
 `;
 
     const response = await ai.models.generateContent({
