@@ -28,6 +28,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
   const [editExpected, setEditExpected] = useState('');
   const [editCaseCount, setEditCaseCount] = useState<number>(1);
   const [editAiPrompt, setEditAiPrompt] = useState('');
+  const [editEngineMode, setEditEngineMode] = useState<'code' | 'ai' | 'both'>('both');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -133,6 +134,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
     setEditExpected(template.expected);
     setEditCaseCount(template.caseCount || 1);
     setEditAiPrompt(template.aiPrompt || '');
+    setEditEngineMode(template.engineMode || 'both');
   };
 
   const handleSaveEdit = (id: string) => {
@@ -146,7 +148,8 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
           steps: editSteps.split('\n').map(l => l.trim()).filter(Boolean),
           expected: editExpected,
           caseCount: editCaseCount,
-          aiPrompt: editAiPrompt.trim() ? editAiPrompt.trim() : undefined
+          aiPrompt: editAiPrompt.trim() ? editAiPrompt.trim() : undefined,
+          engineMode: editEngineMode
         };
       }
       return t;
@@ -172,7 +175,8 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
       caseCount: 1,
       preconditions: ['Subsystem "{feature_name}" is active.'],
       steps: ['1. Trigger the main workspace handler.', '2. Inspect the result state.'],
-      expected: 'Outputs are generated correctly.'
+      expected: 'Outputs are generated correctly.',
+      engineMode: 'both'
     };
     const updated = [...templates, newTemplate];
     setTemplates(updated);
@@ -284,7 +288,27 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
           </div>
           <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex flex-col space-y-1">
             <span className="font-bold text-emerald-700"><code>{`{field_name}`}</code></span>
-            <span className="text-slate-500 text-[10px]">Replaced with individual target input field name</span>
+            <span className="text-slate-500 text-[10px]">Replaced with target input field name</span>
+          </div>
+          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex flex-col space-y-1">
+            <span className="font-bold text-emerald-700"><code>{`{field_length}`}</code></span>
+            <span className="text-slate-500 text-[10px]">Smart length text e.g. "min length is 3 and max length is 5"</span>
+          </div>
+          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex flex-col space-y-1">
+            <span className="font-bold text-emerald-700"><code>{`{field_limits}`}</code></span>
+            <span className="text-slate-500 text-[10px]">Smart bounds text e.g. "min value is 0.00 and max value is 10000.00"</span>
+          </div>
+          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex flex-col space-y-1">
+            <span className="font-bold text-emerald-700"><code>{`{field_required}`}</code></span>
+            <span className="text-slate-500 text-[10px]">"Mandatory (Required)" or "Optional" state text</span>
+          </div>
+          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex flex-col space-y-1">
+            <span className="font-bold text-emerald-700"><code>{`{field_validation}`}</code></span>
+            <span className="text-slate-500 text-[10px]">Replaced with custom field validation rule</span>
+          </div>
+          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex flex-col space-y-1">
+            <span className="font-bold text-emerald-700"><code>{`{field_description}`}</code></span>
+            <span className="text-slate-500 text-[10px]">Replaced with parameter functional purpose & reasoning</span>
           </div>
         </div>
       </div>
@@ -321,6 +345,14 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                     </span>
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
                       Generates {template.caseCount || 1} { (template.caseCount || 1) === 1 ? 'case' : 'cases' }
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
+                      template.engineMode === 'code' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                      template.engineMode === 'ai' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                      'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {template.engineMode === 'code' ? '⚡ Code Only' :
+                       template.engineMode === 'ai' ? '✨ AI Only' : '🔄 Hybrid (Both)'}
                     </span>
                     <span className="font-mono text-[10px] text-slate-400 font-bold">[{template.id}]</span>
                   </div>
@@ -370,6 +402,50 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-sans font-semibold text-slate-800"
                       placeholder="e.g. Verify execution of &quot;{feature_name}&quot;"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-450 mb-1.5 tracking-wider">Generation Engine Mode</label>
+                    <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-lg border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => setEditEngineMode('code')}
+                        className={`py-2 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                          editEngineMode === 'code'
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>⚡ Code Only</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditEngineMode('ai')}
+                        className={`py-2 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                          editEngineMode === 'ai'
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>✨ AI Only</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditEngineMode('both')}
+                        className={`py-2 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                          editEngineMode === 'both'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>🔄 Hybrid (Both)</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+                      {editEngineMode === 'code' && '⚡ Generates high-fidelity test cases strictly using local browser-side programmatic code (0ms latency, zero API costs).'}
+                      {editEngineMode === 'ai' && '✨ Delegates generation entirely to the AI model. Perfect for dynamic natural language scenario expansion.'}
+                      {editEngineMode === 'both' && '🔄 Creates standard local programmatic code templates AND passes a pre-processed massaged data payload to the AI to build advanced contextual variants.'}
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

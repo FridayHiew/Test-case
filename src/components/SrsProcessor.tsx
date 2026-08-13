@@ -68,13 +68,108 @@ const TABLE_TEMPLATE = `# SRS-002: Payment Checkout
 ## Reference
 - Stripe API Specification v2023-10-16, PCI-DSS Compliance Requirement 6.5`;
 
+const RSVP_TEMPLATE = `# SRS-002: Annual Dinner RSVP Registration Form
+
+**Version:** 2.2.0
+
+## Description
+This feature provides an RSVP registration form for customers to register for the Annual Dinner event.
+
+## Assumptions / Pre-conditions
+1. Customer must be an existing member.
+2. Customer must be authenticated (logged in).
+3. Only customers with Gold Card membership or above are eligible to register.
+4. Customer profile must contain a valid registered email address.
+
+## Expected Flow (Mermaid Flow Diagram)
+
+\`\`\`mermaid
+flowchart TD
+    A[Customer Login] --> B{Membership Type}
+    B -->|Gold Card or Above| C[Login Successful]
+    B -->|Below Gold Card| D[Display Eligibility Message]
+
+    C --> E[Open RSVP Registration Form]
+    E --> F[Complete Mandatory Fields]
+    F --> G[Accept Terms & Conditions]
+    G --> H[Submit Button Enabled]
+
+    H --> I[Click Submit]
+    I --> J[Confirmation Prompt]
+
+    J -->|Confirm| K[Save RSVP Registration]
+    J -->|Cancel| E
+
+    K --> L[Send Confirmation Email]
+    L --> M[Registration Completed]
+
+    D --> N[End Process]
+\`\`\`
+
+## Business Rules
+
+### BR-001: Membership Eligibility Validation
+The system shall validate the customer's membership type during login.
+- Eligible Membership Types: Gold Card, Platinum Card, Diamond Card.
+- If the membership type is below Gold Card, display: "This event is only eligible for Gold Card members and above."
+- The customer shall not be allowed to access the registration form.
+
+### BR-002: Mandatory Field Validation
+The Submit button shall be disabled by default. The button shall only be enabled when:
+- All mandatory fields are completed.
+- All field validations pass successfully.
+- The customer accepts the Terms and Conditions.
+
+### BR-003: Submission Confirmation
+Upon clicking Submit, the system shall display a confirmation dialog ("Are you sure you would like to submit your RSVP registration?").
+- Confirm → Registration is saved and confirmation email is sent.
+- Cancel → Return to the registration form without saving.
+
+### BR-004: Duplicate Registration Prevention
+The system shall prevent multiple RSVP submissions for the same event by the same customer. Message: "You have already registered for this event."
+
+### BR-005: Attachment Validation
+If an attachment is uploaded:
+- Supported file types: PDF, JPG, JPEG, PNG
+- Maximum file size: 5 MB
+- File must pass anti-virus scanning before storage
+
+### BR-006: Email Notification
+Upon successful registration, a confirmation email shall be sent containing Registration Number, Event Name, Event Date and Time, and Customer Name.
+
+## Input Fields
+
+| Field Name | UI Data Type | Required | Format / Limits | Validation | Description |
+|---|---|---|---|---|---|
+| memberId | String | Yes | Max 50 characters | Unique member identifier | Member account ID |
+| fullName | Text | Yes | Max 100 characters | Alphabetic characters and spaces only | Customer full name |
+| emailAddress | Text | Yes | Max 254 characters | Valid email format | Registered email address |
+| phoneNumber | Text | Yes | Max 20 characters | Valid phone number format | Customer contact number |
+| gender | Radio Button | Yes | Male, Female, Prefer Not To Say | Single selection only | Customer gender |
+| mealPreference | Dropdown | Yes | Standard, Vegetarian, Halal, Vegan | Single selection only | Dinner meal preference |
+| numberOfGuests | Int | Yes | 0 - 10 | Integer only | Number of accompanying guests |
+| contributionAmount | Decimal | No | 0.00 - 10000.00 | Positive decimal value | Optional sponsorship amount |
+
+## Expected Output Contracts
+| Output Key | Value Type | Description |
+|---|---|---|
+| registrationId | string | Unique RSVP registration confirmation identifier |
+| status | string | Final registration state ("completed" or "failed") |
+| confirmationSent | boolean | Indicates whether email notification was delivered |
+
+## Dependencies
+- USER-AUTH-001, MEMBER-SVC-003, EMAIL-SVC-001
+
+## Reference
+- ISO/IEC 25010 Software Quality Standard, IEEE Std 830-1998 SRS Guidelines`;
+
 export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps) {
-  const [markdown, setMarkdown] = useState<string>(LIST_TEMPLATE);
+  const [markdown, setMarkdown] = useState<string>(RSVP_TEMPLATE);
   const [parsedFeature, setParsedFeature] = useState<Feature | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
 
-  // Parsing algorithm to handle both tabular and bulleted layouts
+  // Parsing algorithm to handle both tabular and bulleted layouts, including Mermaid flows and BR headers
   const parseMarkdownToFeature = (md: string): Feature => {
     const lines = md.split('\n');
     let id = 'SRS-001';
@@ -83,6 +178,7 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
     let description = '';
     let assumptions = '';
     let reference = '';
+    let mermaidDiagram = '';
     const input_fields: InputField[] = [];
     const business_rules: string[] = [];
     const output: Record<string, string> = {};
@@ -90,8 +186,10 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
 
     // Temporary variables for heading tracking
     let currentSection = '';
+    let inCodeBlock = false;
+    let codeBlockContent: string[] = [];
 
-    // Match header: e.g. "# SRS-001: User Profile Update" or "# User Profile Update"
+    // Match header: e.g. "# SRS-002: Annual Dinner RSVP Registration Form"
     const firstLine = lines[0] || '';
     const headerMatch = firstLine.match(/^#\s*([A-Z0-9_-]+)\s*[:|-]\s*(.*)$/i);
     if (headerMatch) {
@@ -107,6 +205,26 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
     // Traverse lines for parsing metadata
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
+
+      // Track code blocks (e.g. ```mermaid)
+      if (line.startsWith('```')) {
+        if (!inCodeBlock) {
+          inCodeBlock = true;
+          codeBlockContent = [];
+        } else {
+          inCodeBlock = false;
+          if (currentSection === 'diagram' || codeBlockContent.some(l => l.includes('flowchart') || l.includes('sequenceDiagram'))) {
+            mermaidDiagram = codeBlockContent.join('\n');
+          }
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeBlockContent.push(line);
+        continue;
+      }
+
       if (!line) continue;
 
       // Extract metadata properties
@@ -126,13 +244,13 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
                                line.match(/^Assumptions(?:\s*[\/|&]\s*Pre-conditions)?:\s*(.*)$/i) || 
                                line.match(/^\*\*Pre-conditions:\*\*\s*(.*)$/i) || 
                                line.match(/^Pre-conditions:\s*(.*)$/i);
-      if (assumptionsMatch) {
+      if (assumptionsMatch && assumptionsMatch[1]) {
         assumptions = assumptionsMatch[1].replace(/[*_]/g, '').trim();
         continue;
       }
 
       const referenceMatch = line.match(/^\*\*Reference[s]?:\*\*\s*(.*)$/i) || line.match(/^Reference[s]?:\s*(.*)$/i);
-      if (referenceMatch) {
+      if (referenceMatch && referenceMatch[1]) {
         reference = referenceMatch[1].replace(/[*_]/g, '').trim();
         continue;
       }
@@ -150,20 +268,41 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
           currentSection = 'dependencies';
         } else if (secHeader.includes('reference')) {
           currentSection = 'reference';
+        } else if (secHeader.includes('assumption') || secHeader.includes('pre-condition')) {
+          currentSection = 'assumptions';
+        } else if (secHeader.includes('flow') || secHeader.includes('mermaid') || secHeader.includes('diagram') || secHeader.includes('expected')) {
+          currentSection = 'diagram';
+        } else if (secHeader.includes('description')) {
+          currentSection = 'description';
         } else {
           currentSection = '';
         }
         continue;
       }
 
-      // Parse list-items or table-rows based on current active section
-      if (currentSection === 'inputs') {
+      // Handle section line parsing
+      if (currentSection === 'description') {
+        if (!description) {
+          description = line;
+        } else {
+          description += ' ' + line;
+        }
+      }
+
+      else if (currentSection === 'assumptions') {
+        const cleanAssump = line.replace(/^[0-9]+\.\s*/, '').replace(/^[-*]\s*/, '').trim();
+        if (cleanAssump) {
+          assumptions = assumptions ? `${assumptions}; ${cleanAssump}` : cleanAssump;
+        }
+      }
+
+      else if (currentSection === 'inputs') {
         // Layout 1: List layout: - `displayName` (type: string, required: true, min: 3, max: 50, validation: "...", description: "...")
         if (line.startsWith('-')) {
           const fieldNameMatch = line.match(/`([^`]+)`/);
           if (fieldNameMatch) {
             const fieldName = fieldNameMatch[1].trim();
-            const typeMatch = line.match(/type:\s*([\w]+)/i);
+            const typeMatch = line.match(/type:\s*([\w\s]+)/i);
             const reqMatch = line.match(/required:\s*(true|false|yes|no)/i);
             const minMatch = line.match(/min:\s*(\d+)/i);
             const maxMatch = line.match(/max:\s*(\d+)/i);
@@ -171,9 +310,17 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             const descMatch = line.match(/description:\s*["']([^"']+)["']/i) || line.match(/desc:\s*["']([^"']+)["']/i);
             const valMatch = line.match(/validation:\s*["']([^"']+)["']/i) || line.match(/val:\s*["']([^"']+)["']/i);
 
+            const rawType = typeMatch ? typeMatch[1].toLowerCase() : 'string';
+            let mappedType: 'string' | 'number' | 'boolean' = 'string';
+            if (rawType.includes('int') || rawType.includes('decimal') || rawType.includes('number') || rawType.includes('float')) {
+              mappedType = 'number';
+            } else if (rawType.includes('bool') || rawType.includes('check')) {
+              mappedType = 'boolean';
+            }
+
             const inputField: InputField = {
               name: fieldName,
-              type: typeMatch ? typeMatch[1].toLowerCase() : 'string',
+              type: mappedType,
               required: reqMatch ? (reqMatch[1].toLowerCase() === 'true' || reqMatch[1].toLowerCase() === 'yes') : false
             };
 
@@ -186,13 +333,21 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             input_fields.push(inputField);
           }
         } 
-        // Layout 2: Tabular layout: | cartId | string | Yes | UUID format | validation | description |
+        // Layout 2: Tabular layout: | Field Name | UI Data Type | Required | Format / Limits | Validation | Description |
         else if (line.startsWith('|')) {
           const cells = line.split('|').map(c => c.trim()).filter(Boolean);
           // Skip header row and formatting rows (e.g. |---|---|)
           if (cells.length >= 3 && !cells[0].includes('---') && !cells[0].toLowerCase().includes('field name')) {
             const fieldName = cells[0].replace(/`/g, '');
-            const type = cells[1].toLowerCase() || 'string';
+            const rawType = cells[1].toLowerCase() || 'string';
+            
+            let mappedType = 'string';
+            if (rawType.includes('int') || rawType.includes('decimal') || rawType.includes('number') || rawType.includes('float')) {
+              mappedType = 'number';
+            } else if (rawType.includes('bool') || rawType.includes('check')) {
+              mappedType = 'boolean';
+            }
+
             const isRequired = cells[2].toLowerCase().includes('yes') || cells[2].toLowerCase().includes('true');
             const limitsCol = cells[3] || '';
             const valCol = cells.length >= 5 ? cells[4] : '';
@@ -200,21 +355,28 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
 
             const inputField: InputField = {
               name: fieldName,
-              type: type,
+              type: mappedType,
               required: isRequired
             };
 
             // Parse numeric limits or string format bounds
+            const maxCharMatch = limitsCol.match(/Max\s+(\d+)\s+characters/i);
+            const rangeMatch = limitsCol.match(/([\d.]+)\s*-\s*([\d.]+)/);
             const minMatch = limitsCol.match(/min:\s*([\d.]+)/i);
             const maxMatch = limitsCol.match(/max:\s*([\d.]+)/i);
-            const formatMatch = limitsCol.match(/(\w+)\s+format/i) || limitsCol.match(/format:\s*(\w+)/i);
 
-            if (minMatch) inputField.min = parseFloat(minMatch[1]);
-            if (maxMatch) inputField.max = parseFloat(maxMatch[1]);
-            if (formatMatch) {
-              inputField.format = formatMatch[1].toLowerCase();
-            } else if (limitsCol && !minMatch && !maxMatch) {
-              inputField.format = limitsCol; // Fallback to raw string
+            if (maxCharMatch) {
+              inputField.max = parseInt(maxCharMatch[1], 10);
+            } else if (rangeMatch) {
+              inputField.min = parseFloat(rangeMatch[1]);
+              inputField.max = parseFloat(rangeMatch[2]);
+            } else {
+              if (minMatch) inputField.min = parseFloat(minMatch[1]);
+              if (maxMatch) inputField.max = parseFloat(maxMatch[1]);
+            }
+
+            if (limitsCol && !maxCharMatch && !rangeMatch && !minMatch && !maxMatch) {
+              inputField.format = limitsCol; // Fallback e.g. "Male, Female, Prefer Not To Say"
             }
 
             if (valCol && valCol !== descCol) inputField.validation = valCol;
@@ -226,15 +388,31 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
       }
 
       else if (currentSection === 'rules') {
-        // Handles standard numbered lists (1. Rule) or bullet points
-        const ruleMatch = line.match(/^\d+\.\s*(.*)$/) || line.match(/^[-*]\s*(.*)$/);
-        if (ruleMatch) {
-          business_rules.push(ruleMatch[1].trim());
+        // Handles subheadings e.g. ### BR-001: Membership Eligibility Validation
+        if (line.startsWith('###')) {
+          const ruleTitle = line.replace(/^###\s*/, '').trim();
+          business_rules.push(ruleTitle);
+        } else if (line.match(/^(?:BR-\d+|RULE-\d+)[:\s]/i)) {
+          business_rules.push(line);
+        } else {
+          // Standard numbered/bullet points or descriptive details under rule header
+          const ruleMatch = line.match(/^\d+\.\s*(.*)$/) || line.match(/^[-*]\s*(.*)$/);
+          const cleanText = ruleMatch ? ruleMatch[1].trim() : line.replace(/^>\s*/, '').trim();
+
+          if (business_rules.length > 0 && cleanText) {
+            const lastRule = business_rules[business_rules.length - 1];
+            if (!lastRule.includes(' - ')) {
+              business_rules[business_rules.length - 1] = `${lastRule} - ${cleanText}`;
+            } else {
+              business_rules[business_rules.length - 1] += ` (${cleanText})`;
+            }
+          } else if (ruleMatch) {
+            business_rules.push(cleanText);
+          }
         }
       }
 
       else if (currentSection === 'outputs') {
-        // Layout 1: List layout: - `status`: "updated" | "failed"
         if (line.startsWith('-')) {
           const outputNameMatch = line.match(/`([^`]+)`/);
           if (outputNameMatch) {
@@ -243,9 +421,7 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             const outValue = afterColon.length > 1 ? afterColon[1].trim() : 'string';
             output[outKey] = outValue;
           }
-        } 
-        // Layout 2: Tabular layout: | paymentIntentId | string | Description |
-        else if (line.startsWith('|')) {
+        } else if (line.startsWith('|')) {
           const cells = line.split('|').map(c => c.trim()).filter(Boolean);
           if (cells.length >= 2 && !cells[0].includes('---') && !cells[0].toLowerCase().includes('key') && !cells[0].toLowerCase().includes('output')) {
             const outKey = cells[0].replace(/`/g, '');
@@ -258,7 +434,6 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
       else if (currentSection === 'dependencies') {
         const depLine = line.replace(/^[-*\s]+/, '').trim();
         if (depLine) {
-          // Supports comma-separated dependencies: USER-001, AUTH-002
           const parts = depLine.split(',').map(p => p.trim()).filter(Boolean);
           dependencies.push(...parts);
         }
@@ -282,7 +457,8 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
       business_rules,
       output,
       dependencies,
-      reference: reference ? reference : undefined
+      reference: reference ? reference : undefined,
+      mermaidDiagram: mermaidDiagram ? mermaidDiagram : undefined
     };
   };
 
@@ -332,7 +508,15 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
             Convert your software requirements specifications (SRS) Markdown files instantly into system features. Paste specs, copy template layouts, edit parsed parameters, and persist features to the generator in one click.
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setMarkdown(RSVP_TEMPLATE)}
+            className="inline-flex items-center px-3 py-1.5 border border-indigo-200 hover:border-indigo-300 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-100/50 rounded-lg text-xs font-semibold transition"
+          >
+            <FileText className="w-3.5 h-3.5 mr-1.5 text-indigo-600" />
+            RSVP Form Spec (SRS-002)
+          </button>
           <button
             type="button"
             onClick={() => setMarkdown(LIST_TEMPLATE)}
@@ -546,6 +730,19 @@ export default function SrsProcessor({ db, onImportComplete }: SrsProcessorProps
                     </div>
                   )}
                 </div>
+
+                {/* Expected Flow Mermaid Diagram */}
+                {parsedFeature.mermaidDiagram && (
+                  <div className="space-y-1.5">
+                    <span className="font-bold text-slate-800 block flex items-center">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 mr-1.5"></span>
+                      Parsed Expected Flowchart (Mermaid)
+                    </span>
+                    <pre className="p-3 bg-slate-900 text-emerald-400 rounded-lg font-mono text-[10px] overflow-x-auto leading-relaxed border border-slate-800">
+                      {parsedFeature.mermaidDiagram}
+                    </pre>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="p-12 text-center text-slate-400 italic">

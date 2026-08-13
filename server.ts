@@ -27,12 +27,69 @@ const getGeminiClient = () => {
   });
 };
 
+// Helper function to generate content with exponential backoff and high-availability model fallbacks
+async function generateContentWithRetry(ai: any, params: {
+  contents: any;
+  config?: any;
+  preferredModel?: string;
+}) {
+  const models = [
+    params.preferredModel || 'gemini-3.6-flash',
+    'gemini-flash-latest',
+    'gemini-3.1-flash-lite'
+  ];
+
+  let lastError: any = null;
+
+  for (const model of models) {
+    let delay = 1000;
+    const maxRetries = 3;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[Gemini API] Attempting generation with model "${model}" (attempt ${attempt}/${maxRetries})...`);
+        const response = await ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
+        console.log(`[Gemini API] Generation succeeded with model "${model}" on attempt ${attempt}.`);
+        return response;
+      } catch (error: any) {
+        lastError = error;
+        const errMsg = error.message || String(error);
+        const statusCode = error.status || error.statusCode || (error.error && error.error.code);
+        
+        const isTransient = statusCode === 503 || 
+                            statusCode === 429 || 
+                            errMsg.includes('503') || 
+                            errMsg.includes('429') || 
+                            errMsg.toLowerCase().includes('high demand') || 
+                            errMsg.toLowerCase().includes('temporary') ||
+                            errMsg.toLowerCase().includes('unavailable') ||
+                            errMsg.toLowerCase().includes('rate limit');
+
+        if (isTransient && attempt < maxRetries) {
+          console.warn(`[Gemini API] Transient error on model "${model}" (attempt ${attempt}/${maxRetries}): ${errMsg}. Retrying in ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay *= 2;
+        } else {
+          console.warn(`[Gemini API] Error on model "${model}" (attempt ${attempt}/${maxRetries}): ${errMsg}. Proceeding to fallback options...`);
+          break; // Break current retry loop to switch model
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error('All Gemini model generation attempts failed.');
+}
+
 // API: Test Connection
 app.get('/api/test-connection', async (req, res) => {
   try {
     const ai = getGeminiClient();
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+    const response = await generateContentWithRetry(ai, {
+      preferredModel: 'gemini-3.6-flash',
       contents: 'Ping',
     });
     if (response.text) {
@@ -54,8 +111,8 @@ app.post('/api/generate', async (req, res) => {
     }
 
     const ai = getGeminiClient();
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+    const response = await generateContentWithRetry(ai, {
+      preferredModel: 'gemini-3.6-flash',
       contents: prompt,
       config: {
         systemInstruction: systemInstruction || 'You are an expert QA and test engineer.',
@@ -161,8 +218,8 @@ TASK:
 Ensure that each flow path represents exactly 1 coherent, high-quality, professional-grade test case.
 `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+    const response = await generateContentWithRetry(ai, {
+      preferredModel: 'gemini-3.6-flash',
       contents: prompt,
       config: {
         systemInstruction: `You are an elite E2E systems architect. Trace the Mermaid flowchart, identify all main and alternative paths, and generate exactly 1 logical E2E test case per path in the requested JSON structure.`,

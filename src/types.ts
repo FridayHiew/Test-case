@@ -20,6 +20,7 @@ export interface Feature {
   output: Record<string, string>;
   dependencies?: string[];
   reference?: string;
+  mermaidDiagram?: string;
 }
 
 export interface TestCase {
@@ -54,6 +55,7 @@ export interface BaseCaseTemplate {
   expected: string;
   caseCount?: number;
   aiPrompt?: string;
+  engineMode?: 'code' | 'ai' | 'both'; // Mode: instant Code-level, AI-driven, or Both (default: 'both')
 }
 
 export interface E2ETestCase {

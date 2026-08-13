@@ -7,21 +7,23 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     type: 'boundary',
     enabled: true,
     caseCount: 1,
+    engineMode: 'both',
     preconditions: [
       '{dependencies}',
-      'Target input parameter "{field_name}" (type: {field_type}) is rendered and interactable.',
+      'Target input parameter "{field_name}" (type: {field_type}, required: {field_required}) is rendered and interactable.',
+      'Field Limits & Length: {field_length}.',
       'Field Purpose Reasoning: {field_description}'
     ],
     steps: [
       '1. Focus input parameter "{field_name}".',
-      '2. Requiredness Check: Test empty submission behavior (Mandatory vs Optional).',
+      '2. Requiredness Check: Test empty submission behavior for {field_required} parameter.',
       '3. Data Type Compliance: Attempt mismatched values against data type "{field_type}".',
-      '4. Boundary Limits Verification: Test min/max range limits, lengths, and format constraints.',
-      '5. Custom Constraint Compliance: Verify custom validation rules if specified.',
-      '6. Functional Reasoning: Verify behavior matches described parameter purpose.'
+      '4. Boundary Limits & Length Verification: Verify length constraints ({field_length}) and bound limits ({field_limits}).',
+      '5. Custom Constraint Compliance: Verify custom rule constraints ({field_validation}).',
+      '6. Functional Reasoning: Verify behavior aligns with described parameter purpose ({field_description}).'
     ],
-    expected: 'System strictly validates input parameter "{field_name}", enforcing type safety, boundary limits, required constraints, custom validation rules, and description reasoning.',
-    aiPrompt: 'Validate edge case parameter values, special character sanitization, and boundary limits for this input field.'
+    expected: 'System strictly validates input parameter "{field_name}", enforcing type safety, length constraints ({field_length}), bound limits ({field_limits}), requiredness ({field_required}), custom validation ({field_validation}), and description reasoning.',
+    aiPrompt: 'Rephrase boundary steps and add dynamic reasoning for edge cases based on parameter description "{field_description}".'
   },
   {
     id: 'business-rule-baseline',
@@ -29,6 +31,7 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     type: 'business_rule',
     enabled: true,
     caseCount: 1,
+    engineMode: 'both',
     preconditions: [
       '{dependencies}',
       'System state satisfies prerequisite conditions for rule: "{rule}".'
@@ -47,6 +50,7 @@ export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
     type: 'positive',
     enabled: true,
     caseCount: 1,
+    engineMode: 'both',
     preconditions: [
       '{dependencies}',
       'Ensure the active environment state satisfies general specifications.'
@@ -326,11 +330,12 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
 
   // Helper to dynamically compile placeholders inside baseline templates
   private compileTemplateValue(val: string, feature: Feature, requiredNames: string, outputNames: string): string {
-    let result = val;
+    let result = val || '';
     result = result.replace(/{feature_id}/g, feature.id.toUpperCase());
     result = result.replace(/{feature_name}/g, feature.name);
     result = result.replace(/{required_inputs}/g, requiredNames || 'standard inputs');
     result = result.replace(/{output_names}/g, outputNames);
+    result = result.replace(/{business_rules}/g, (feature.business_rules && feature.business_rules.length > 0) ? feature.business_rules.join('; ') : 'standard business constraints');
 
     // Resolve dependencies placeholder
     if (result.includes('{dependencies}')) {
@@ -344,159 +349,226 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
     return result;
   }
 
-  // Programmatic, high-performance code-level test case generator
-  // Handles the MAIN/HEAVY LOAD: Generating exactly 1 detailed test case per input field,
-  // validating all parameters (lengths, datatype, validations, etc.) and reasoning with descriptions.
+  // Compile field-level baseline template placeholders
+  private compileFieldTemplateValue(
+    val: string,
+    feature: Feature,
+    field: any,
+    requiredNames: string,
+    outputNames: string
+  ): string {
+    let result = this.compileTemplateValue(val, feature, requiredNames, outputNames);
+
+    // Compute dynamic smart length text
+    let fieldLengthStr = 'standard length constraints';
+    if (field.min !== undefined && field.max !== undefined) {
+      fieldLengthStr = `min length is ${field.min} and max length is ${field.max}`;
+    } else if (field.min !== undefined) {
+      fieldLengthStr = `minimum length is ${field.min} characters`;
+    } else if (field.max !== undefined) {
+      fieldLengthStr = `maximum length is ${field.max} characters`;
+    } else if (field.format && field.format.trim() !== '') {
+      fieldLengthStr = field.format;
+    }
+
+    // Compute dynamic smart limits text
+    let fieldLimitsStr = 'standard parameter bounds';
+    if (field.min !== undefined && field.max !== undefined) {
+      fieldLimitsStr = `min value is ${field.min} and max value is ${field.max}`;
+    } else if (field.min !== undefined) {
+      fieldLimitsStr = `minimum threshold is ${field.min}`;
+    } else if (field.max !== undefined) {
+      fieldLimitsStr = `maximum threshold is ${field.max}`;
+    } else if (field.format && field.format.trim() !== '') {
+      fieldLimitsStr = field.format;
+    }
+
+    const fieldValidationStr = field.validation || 'standard format validation';
+    const fieldDescStr = field.description || `validates functional purpose for input parameter "${field.name}"`;
+    const fieldReqStr = field.required ? 'Mandatory (Required)' : 'Optional';
+
+    result = result.replace(/{field_name}/g, field.name);
+    result = result.replace(/{field_type}/g, field.type);
+    result = result.replace(/{field_required}/g, fieldReqStr);
+    result = result.replace(/{field_length}/g, fieldLengthStr);
+    result = result.replace(/{field_limits}/g, fieldLimitsStr);
+    result = result.replace(/{field_validation}/g, fieldValidationStr);
+    result = result.replace(/{field_description}/g, fieldDescStr);
+
+    if (result.includes('{bounds_steps}')) {
+      const dynamicSteps = this.getDynamicFieldSteps(feature, field).join(' \n');
+      result = result.replace(/{bounds_steps}/g, dynamicSteps);
+    }
+
+    return result;
+  }
+
+  // Compile business-rule-level baseline template placeholders
+  private compileRuleTemplateValue(
+    val: string,
+    feature: Feature,
+    rule: string,
+    requiredNames: string,
+    outputNames: string
+  ): string {
+    let result = this.compileTemplateValue(val, feature, requiredNames, outputNames);
+    result = result.replace(/{rule}/g, rule);
+    return result;
+  }
+
+  // Dynamic step generator for boundary testing if template includes {bounds_steps}
+  private getDynamicFieldSteps(feature: Feature, field: any): string[] {
+    const steps: string[] = [
+      `1. Focus the input field "${field.name}" inside the "${feature.name}" workspace.`
+    ];
+
+    if (field.required) {
+      steps.push(`2. Requiredness Check: Leave "${field.name}" completely blank and attempt validation. Expected: Submission blocks, highlighting "${field.name}" as mandatory.`);
+    } else {
+      steps.push(`2. Optionality Check: Leave "${field.name}" blank and submit. Expected: System accepts empty input without warning.`);
+    }
+
+    let wrongTypeSample = 'invalid_text';
+    if (field.type === 'number') wrongTypeSample = '"not-a-number" text';
+    else if (field.type === 'boolean') wrongTypeSample = '"some_string" instead of true/false';
+    steps.push(`3. Data Type Compliance: Mismatch test by sending ${wrongTypeSample} to "${field.name}". Expected: Rejects value or forces conversion to conform with data type "${field.type}".`);
+
+    if (field.type === 'string') {
+      const minVal = field.min !== undefined ? field.min : 1;
+      const maxVal = field.max !== undefined ? field.max : 255;
+      steps.push(`4. Length Boundary Validation: Enter string of length ${minVal - 1} and length ${maxVal + 1}. Expected: Validation alerts trigger.`);
+      steps.push(`5. Length Acceptance Verification: Enter string of length ${minVal} and length ${maxVal}. Expected: Accepted.`);
+    } else if (field.type === 'number') {
+      const minVal = field.min !== undefined ? field.min : 0;
+      const maxVal = field.max !== undefined ? field.max : 999999;
+      steps.push(`4. Value Range Boundary Validation: Enter numeric value ${minVal - 1} and value ${maxVal + 1}. Expected: Rejection warnings block submission.`);
+      steps.push(`5. Value Acceptance Verification: Input boundary values ${minVal} and ${maxVal}. Expected: Accepted by numerical engine.`);
+    }
+
+    if (field.validation) {
+      steps.push(`6. Custom Constraint Compliance: Attempt inputs violating specified rule "${field.validation}". Expected: System blocks submission.`);
+    }
+
+    if (field.description) {
+      steps.push(`7. Logical Intent Reasoning: Check functional behavior based on described purpose ("${field.description}").`);
+    }
+
+    return steps;
+  }
+
+  // Programmatic, high-performance code-level test case generator.
+  // Dynamically uses active baseline templates (including user edits) and generates test cases per field / rule / feature.
   public generateCodeLevelTestCases(feature: Feature): TestResult {
     const test_cases: any[] = [];
     const coverage: string[] = [];
 
-    const fields = feature.input_fields || [];
+    const codeTemplates = (this.config.programmaticTemplates && this.config.programmaticTemplates.length > 0
+      ? this.config.programmaticTemplates
+      : DEFAULT_BASE_TEMPLATES).filter(t => t.enabled !== false && t.engineMode !== 'ai');
 
-    if (fields.length === 0) {
-      // Fallback if no fields are defined
-      test_cases.push({
-        id: `TC-${feature.id.toUpperCase()}-NO-FIELDS`,
-        title: `Verify initial configuration and load response of "${feature.name}"`,
-        type: 'positive',
-        preconditions: [
-          feature.dependencies && feature.dependencies.length > 0
-            ? `Verification of prerequisite dependencies is complete: ${feature.dependencies.join(', ')} must be fully functional.`
-            : 'Active user session is verified.',
-          'Subsystem is loaded and fully operational.'
-        ],
-        steps: [
-          `1. Navigate to the "${feature.name}" feature workspace.`,
-          `2. Check that the interface initializes without errors or pending locks.`
-        ],
-        expected: `System loads successfully. Description context: "${feature.description}" is fully compliant.`
-      });
-      coverage.push('Initial load and setup validation');
-    } else {
-      // Loop over each field and generate exactly 1 comprehensive validation test case!
-      fields.forEach((field, fIdx) => {
-        const fieldNameUpper = field.name.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
-        const id = `TC-${feature.id.toUpperCase()}-${fieldNameUpper || fIdx + 1}`;
-        const title = `[Field Validation] Comprehensive validation for field "${field.name}"`;
-        
-        // Build robust preconditions
-        const preconditions: string[] = [
-          feature.dependencies && feature.dependencies.length > 0
-            ? `Dependencies are healthy: ${feature.dependencies.join(', ')} are operational.`
-            : 'User is authenticated with an active form session.',
-          `Target input field "${field.name}" (type: ${field.type}) is rendered and interactable.`
-        ];
+    const requiredNames = (feature.input_fields || [])
+      .filter(f => f.required)
+      .map(f => f.name)
+      .join(', ') || '';
 
-        // If description is present, add reasoning about how the system works
-        if (field.description) {
-          preconditions.push(`Field Purpose Reasoning (from description): ${field.description}`);
-        } else {
-          preconditions.push(`Field Purpose Reasoning: Validates data entry for parameter "${field.name}".`);
-        }
+    const outputNames = Object.keys(feature.output || {}).join(', ') || 'expected state outputs';
 
-        // Build exhaustive steps to check datatype, lengths, empty values, and validation rules
-        const steps: string[] = [
-          `1. Focus the input field "${field.name}" inside the "${feature.name}" workspace.`
-        ];
+    codeTemplates.forEach((template) => {
+      const isFieldTemplate = template.id.includes('field') || 
+                              template.title.includes('{field_name}') || 
+                              template.steps.some(s => s.includes('{field_name}'));
+      const isRuleTemplate = template.id.includes('rule') || 
+                             template.title.includes('{rule}') || 
+                             template.steps.some(s => s.includes('{rule}'));
 
-        // Required check
-        if (field.required) {
-          steps.push(`2. Requiredness Check: Leave "${field.name}" completely blank and attempt validation or submit. Expected: Submission blocks, highlighting "${field.name}" as mandatory.`);
-        } else {
-          steps.push(`2. Optionality Check: Leave "${field.name}" blank and submit. Expected: System accepts empty input without warning.`);
-        }
+      if (isFieldTemplate) {
+        // ONLY generate test cases for input fields (NOT business rules)
+        const fields = feature.input_fields || [];
+        fields.forEach((field, fIdx) => {
+          const fieldNameUpper = field.name.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+          const id = `TC-${feature.id.toUpperCase()}-${fieldNameUpper || fIdx + 1}`;
 
-        // Data type check
-        let wrongTypeSample = 'invalid_text';
-        if (field.type === 'number') {
-          wrongTypeSample = '"not-a-number" text';
-        } else if (field.type === 'boolean') {
-          wrongTypeSample = '"some_string" instead of true/false';
-        } else if (field.type === 'array') {
-          wrongTypeSample = 'a scalar string';
-        } else if (field.type === 'object') {
-          wrongTypeSample = 'primitive string';
-        }
-        steps.push(`3. Data Type Compliance: Type mismatch trial by sending ${wrongTypeSample} to "${field.name}". Expected: Rejects value or forces conversion to conform with data type "${field.type}".`);
+          const title = this.compileFieldTemplateValue(template.title, feature, field, requiredNames, outputNames);
+          const type = template.type || (field.required ? 'negative' : 'boundary');
+          const preconditions = (template.preconditions || []).map(p => 
+            this.compileFieldTemplateValue(p, feature, field, requiredNames, outputNames)
+          );
 
-        // Length/Range boundary checks
-        if (field.type === 'string') {
-          const minVal = field.min !== undefined ? field.min : 1;
-          const maxVal = field.max !== undefined ? field.max : 255;
-          steps.push(`4. Length Boundary Validation: Write text string of length ${minVal - 1} (below min length constraint of ${minVal}) and length ${maxVal + 1} (above max length constraint of ${maxVal}). Expected: Validation alerts trigger, blocking the inputs.`);
-          steps.push(`5. Length Acceptance Verification: Write a compliant string of length exactly ${minVal} and length ${maxVal}. Expected: Successfully verified and accepted.`);
-        } else if (field.type === 'number') {
-          const minVal = field.min !== undefined ? field.min : 0;
-          const maxVal = field.max !== undefined ? field.max : 999999;
-          steps.push(`4. Value Boundary Range Validation: Enter numeric value ${minVal - 1} (below min constraint of ${minVal}) and numeric value ${maxVal + 1} (above max constraint of ${maxVal}). Expected: Rejection warnings block submission.`);
-          steps.push(`5. Value Acceptance Verification: Input compliant boundary values (exactly ${minVal} and ${maxVal}). Expected: Accepted by numerical engine.`);
-        } else {
-          steps.push(`4. General bounds verification check: Validate elements with respect to limits, sizes, and formats.`);
-        }
+          const steps: string[] = [];
+          (template.steps || []).forEach(s => {
+            if (s.includes('{bounds_steps}')) {
+              steps.push(...this.getDynamicFieldSteps(feature, field));
+            } else {
+              steps.push(this.compileFieldTemplateValue(s, feature, field, requiredNames, outputNames));
+            }
+          });
 
-        // Custom validation check
-        if (field.validation) {
-          steps.push(`6. Custom Constraint Compliance: Attempt inputs that violate specified validation rules "${field.validation}". Expected: System blocks submission and displays specific validation warnings.`);
-        }
+          const expected = this.compileFieldTemplateValue(template.expected || '', feature, field, requiredNames, outputNames);
 
-        // Use field description for user logic reasoning step
-        if (field.description) {
-          steps.push(`7. Logical Intent Reasoning: Check functional behavior based on described purpose ("${field.description}") to ensure business operations map accurately.`);
-        }
+          test_cases.push({
+            id,
+            title,
+            type,
+            preconditions,
+            steps,
+            expected
+          });
 
-        // Expected output details
-        const expected = `The system successfully enforces all constraints on input parameter "${field.name}". It blocks empty states if required, restricts inputs based on type "${field.type}" and size limits, applies standard rule validations${field.validation ? ` ("${field.validation}")` : ''}, and matches the logical design expectations outlined in the field description.`;
+          coverage.push(`Input parameter "${field.name}" specification validation (${template.title})`);
+        });
+      } else if (isRuleTemplate) {
+        // ONLY generate test cases for business rules (NOT input fields)
+        const rules = feature.business_rules || [];
+        rules.forEach((rule, rIdx) => {
+          const id = `TC-${feature.id.toUpperCase()}-RULE-${rIdx + 1}`;
+
+          const title = this.compileRuleTemplateValue(template.title, feature, rule, requiredNames, outputNames);
+          const type = template.type || 'business_rule';
+          const preconditions = (template.preconditions || []).map(p => 
+            this.compileRuleTemplateValue(p, feature, rule, requiredNames, outputNames)
+          );
+          const steps = (template.steps || []).map(s => 
+            this.compileRuleTemplateValue(s, feature, rule, requiredNames, outputNames)
+          );
+          const expected = this.compileRuleTemplateValue(template.expected || '', feature, rule, requiredNames, outputNames);
+
+          test_cases.push({
+            id,
+            title,
+            type,
+            preconditions,
+            steps,
+            expected
+          });
+
+          coverage.push(`Business rule #${rIdx + 1} validation (${template.title})`);
+        });
+      } else {
+        // Feature-level baseline template
+        const id = `TC-${feature.id.toUpperCase()}-BASE-${template.id.toUpperCase().replace(/[^A-Z0-9_-]/g, '')}`;
+
+        const title = this.compileTemplateValue(template.title, feature, requiredNames, outputNames);
+        const type = template.type || 'positive';
+        const preconditions = (template.preconditions || []).map(p => 
+          this.compileTemplateValue(p, feature, requiredNames, outputNames)
+        );
+        const steps = (template.steps || []).map(s => 
+          this.compileTemplateValue(s, feature, requiredNames, outputNames)
+        );
+        const expected = this.compileTemplateValue(template.expected || '', feature, requiredNames, outputNames);
 
         test_cases.push({
           id,
           title,
-          type: field.required ? 'negative' : 'boundary',
+          type,
           preconditions,
           steps,
           expected
         });
 
-        coverage.push(`Input field "${field.name}" comprehensive specifications validation`);
-      });
-    }
-
-    // Generate 1 test case per business rule defined in feature specifications!
-    const rules = feature.business_rules || [];
-    if (rules.length > 0) {
-      const outputNamesStr = Object.keys(feature.output || {}).join(', ') || 'expected system outputs';
-      rules.forEach((rule, rIdx) => {
-        const id = `TC-${feature.id.toUpperCase()}-RULE-${rIdx + 1}`;
-        const title = `[Business Rule] Verify compliance for rule: "${rule}"`;
-        
-        const preconditions: string[] = [
-          feature.dependencies && feature.dependencies.length > 0
-            ? `Dependencies are operational: ${feature.dependencies.join(', ')} must be in a ready state.`
-            : 'Active user session and feature workspace are loaded.',
-          `Rule Context: "${rule}"`,
-          `System Assumptions: ${feature.assumptions || 'Default environment conditions apply.'}`
-        ];
-
-        const steps: string[] = [
-          `1. Initialize the "${feature.name}" workspace transaction.`,
-          `2. Formulate input values specifically to evaluate business rule: "${rule}".`,
-          `3. Trigger execution path and observe rule processing.`,
-          `4. Inspect output fields [${outputNamesStr}] and verify state persistence.`
-        ];
-
-        const expected = `The application strictly enforces business rule: "${rule}". State transitions and output contracts [${outputNamesStr}] complete as expected without specification violations.`;
-
-        test_cases.push({
-          id,
-          title,
-          type: 'business_rule',
-          preconditions,
-          steps,
-          expected
-        });
-
-        coverage.push(`Business rule #${rIdx + 1} ("${rule}") unit test validation`);
-      });
-    }
+        coverage.push(`Feature workflow validation (${feature.name})`);
+      }
+    });
 
     return { test_cases, coverage };
   }
@@ -566,41 +638,73 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
       ? `\n### External References / System Maps:\n${feature.reference}`
       : '';
 
+    const requiredNames = (feature.input_fields || [])
+      .filter(f => f.required)
+      .map(f => f.name)
+      .join(', ') || '';
+    const outputNames = Object.keys(feature.output || {}).join(', ') || 'expected state outputs';
+
     // Get active programmatic template titles so AI doesn't duplicate them
     const activeTemplates = this.config.programmaticTemplates && this.config.programmaticTemplates.length > 0
       ? this.config.programmaticTemplates
       : DEFAULT_BASE_TEMPLATES;
-    const activeProgrammaticTitles = activeTemplates
-      .filter(t => t.enabled)
+
+    // Only list programmatic titles for templates that run strictly in 'code' mode
+    const codeOnlyTitles = activeTemplates
+      .filter(t => t.enabled && (t.engineMode || 'both') === 'code')
       .map(t => `- ${t.title.replace(/{feature_name}/g, feature.name)}`)
       .join('\n');
 
-    // Extract custom AI prompt directives from baseline templates
-    const activeAiPrompts = activeTemplates
-      .filter(t => t.enabled && t.aiPrompt && t.aiPrompt.trim() !== '')
-      .map(t => `- Template "${t.title.replace(/{feature_name}/g, feature.name)}": ${t.aiPrompt}`)
-      .join('\n');
+    // Extract and resolve custom AI prompt directives from baseline templates enabled for 'ai' or 'both'
+    const compiledAiPrompts: string[] = [];
+    const aiTemplates = activeTemplates.filter(t => t.enabled && (t.engineMode || 'both') !== 'code');
 
-    const aiPromptContext = activeAiPrompts
-      ? `\n### Baseline AI Prompt Guidance (Special Scenario Directives):\n${activeAiPrompts}\n*Special Requirement*: Ensure the generated test cases incorporate the special scenario directives specified in the baseline templates above.\n`
+    aiTemplates.forEach(t => {
+      const isFieldTemplate = t.id.includes('field') || t.title.includes('{field_name}') || t.steps.some(s => s.includes('{field_name}'));
+      const isRuleTemplate = t.id.includes('rule') || t.title.includes('{rule}') || t.steps.some(s => s.includes('{rule}'));
+
+      // Massaged pre-processed data context (reduced prompt payload size for AI)
+      const customPrompt = t.aiPrompt && t.aiPrompt.trim() !== '' 
+        ? t.aiPrompt 
+        : `Generate comprehensive test case for template: "${t.title}". Preconditions: ${t.preconditions?.join('; ')}. Steps: {bounds_steps}. Expected: ${t.expected}`;
+
+      if (isFieldTemplate) {
+        (feature.input_fields || []).forEach(field => {
+          const promptText = this.compileFieldTemplateValue(customPrompt, feature, field, requiredNames, outputNames);
+          compiledAiPrompts.push(`- [Parameter "${field.name}"] Target Directive: ${promptText}`);
+        });
+      } else if (isRuleTemplate) {
+        (feature.business_rules || []).forEach(rule => {
+          const promptText = this.compileRuleTemplateValue(customPrompt, feature, rule, requiredNames, outputNames);
+          compiledAiPrompts.push(`- [Business Rule] Target Directive: ${promptText}`);
+        });
+      } else {
+        const promptText = this.compileTemplateValue(customPrompt, feature, requiredNames, outputNames);
+        compiledAiPrompts.push(`- [Feature Workflow] Target Directive: ${promptText}`);
+      }
+    });
+
+    const aiPromptContext = compiledAiPrompts.length > 0
+      ? `\n### Massaged Baseline AI Directives (GENERATION TARGETS):\nYou MUST generate test cases explicitly adhering to these massaged baseline directives:\n${compiledAiPrompts.join('\n')}\n`
       : '';
 
     return `
-Please generate exactly ${limit} highly specialized, advanced test cases that target the unique business rules or custom user specifications of this feature.
+Please generate exactly ${limit} highly specialized test cases for this feature.
 
-The following test scenario types are already covered programmatically at the code level. Do NOT generate duplicates of these:
-${activeProgrammaticTitles || '- Standard basic checks'}
-${aiPromptContext}
+${codeOnlyTitles ? `The following titles are already generated strictly by code (do not duplicate):\n${codeOnlyTitles}\n` : ''}
 ### Feature: ${feature.name}
 ### Description: ${feature.description}${depsContext}${inputsContext}${assumptionsContext}${referenceContext}
 
 ### Business Rules to cover:
 ${feature.business_rules.map((rule, idx) => `${idx + 1}. ${rule}`).join('\n')}
-
+${aiPromptContext}
 ### Target Custom User Test Scope:
-"${userInput || 'Test advanced business rule interactions'}"
+"${userInput || 'Test advanced business rule interactions and input parameter specifications'}"
 
-Generate ONLY ${limit} high-value, deep test cases. Reply strictly in JSON format.
+Notice: Standard baseline cases are generated locally for basic titles.
+If "Massaged Baseline AI Directives" above specify custom instructions for parameters or rules, prioritize those directives and materialize them!
+
+Generate ONLY ${limit} high-value test cases. Reply strictly in JSON format.
 `;
   }
 
@@ -608,8 +712,8 @@ Generate ONLY ${limit} high-value, deep test cases. Reply strictly in JSON forma
   private buildOptimizedSystemInstruction(): string {
     const limit = this.config.aiCaseLimit && this.config.aiCaseLimit > 0 ? this.config.aiCaseLimit : 2;
     return `
-You are a senior QA & Test Automation Architect. Generate exactly ${limit} highly specialized test cases focusing purely on intricate business-logic interactions, custom edge cases, or the user's specific test scope.
-Do NOT generate basic, simple validations because those are already handled programmatically at the code level.
+You are a senior QA & Test Automation Architect. Generate exactly ${limit} highly specialized test cases focusing on intricate business-logic interactions, custom edge cases, and baseline AI directives.
+If specific Baseline AI Directives are provided in the prompt for parameters or rules, follow those directives precisely.
 
 You MUST reply strictly in JSON format with two top-level fields:
 {
