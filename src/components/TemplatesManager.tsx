@@ -444,7 +444,7 @@ export default function TemplatesManager({ config, onConfigChange, llmClient }: 
                     <p className="text-[10px] text-slate-400 mt-1 leading-normal">
                       {editEngineMode === 'code' && '⚡ Generates high-fidelity test cases strictly using local browser-side programmatic code (0ms latency, zero API costs).'}
                       {editEngineMode === 'ai' && '✨ Delegates generation entirely to the AI model. Perfect for dynamic natural language scenario expansion.'}
-                      {editEngineMode === 'both' && '🔄 Creates standard local programmatic code templates AND passes a pre-processed massaged data payload to the AI to build advanced contextual variants.'}
+                      {editEngineMode === 'both' && '🔄 Massages and packages the template parameters (including preconditions, expectations, and steps) into a compressed prompt payload, allowing Gemini AI to generate the test cases with high efficiency and contextual intelligence.'}
                     </p>
                   </div>
 

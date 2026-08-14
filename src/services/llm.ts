@@ -458,13 +458,13 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
 
   // Programmatic, high-performance code-level test case generator.
   // Dynamically uses active baseline templates (including user edits) and generates test cases per field / rule / feature.
-  public generateCodeLevelTestCases(feature: Feature): TestResult {
+  public generateCodeLevelTestCases(feature: Feature, includeAllEngineModes = false): TestResult {
     const test_cases: any[] = [];
     const coverage: string[] = [];
 
     const codeTemplates = (this.config.programmaticTemplates && this.config.programmaticTemplates.length > 0
       ? this.config.programmaticTemplates
-      : DEFAULT_BASE_TEMPLATES).filter(t => t.enabled !== false && t.engineMode !== 'ai');
+      : DEFAULT_BASE_TEMPLATES).filter(t => t.enabled !== false && (includeAllEngineModes || t.engineMode === 'code'));
 
     const requiredNames = (feature.input_fields || [])
       .filter(f => f.required)
@@ -575,11 +575,11 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
 
   // Generate test cases based on feature metadata and user natural language input
   async generate(feature: Feature, userInput: string): Promise<TestResult> {
-    // 1. Programmatically generate robust, high-quality base test cases instantly
-    const programmaticResult = this.generateCodeLevelTestCases(feature);
+    // 1. Programmatically generate base test cases for 'code' engineMode templates
+    const programmaticResult = this.generateCodeLevelTestCases(feature, false);
 
     try {
-      // 2. Build the lightweight, optimized AI prompt requesting only custom/complex rule validations
+      // 2. Build the lightweight, optimized AI prompt requesting custom/complex rule validations
       const prompt = this.buildOptimizedPrompt(feature, userInput);
       const systemInstruction = this.buildOptimizedSystemInstruction();
 
@@ -599,8 +599,16 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
       }
 
       // Merge the programmatic test suite with the AI's specialized rule/scope validations
-      const combinedTestCases = [...programmaticResult.test_cases, ...aiResult.test_cases];
-      const combinedCoverage = [...new Set([...programmaticResult.coverage, ...aiResult.coverage])];
+      let combinedTestCases = [...programmaticResult.test_cases, ...aiResult.test_cases];
+      let combinedCoverage = [...new Set([...programmaticResult.coverage, ...aiResult.coverage])];
+
+      // SAFETY NET: If AI generated 0 cases, trigger programmatic suite for ALL enabled templates so result is never 0
+      if (combinedTestCases.length === 0) {
+        console.warn('AI model returned 0 test cases. Falling back to programmatic engine for all enabled templates.');
+        const fallbackResult = this.generateCodeLevelTestCases(feature, true);
+        combinedTestCases = fallbackResult.test_cases;
+        combinedCoverage = fallbackResult.coverage;
+      }
 
       // Ensure unique IDs across all merged test cases
       const uniqueTestCases = combinedTestCases.map((tc, index) => ({
@@ -613,9 +621,19 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
         coverage: combinedCoverage
       };
     } catch (err: any) {
-      console.warn('AI generation failed or hit local memory/quota limitations. Falling back to robust code-level suite:', err);
-      // Perfect fallback: return programmatic cases so the application never fails
-      return programmaticResult;
+      console.warn('AI generation encountered error or limitation:', err?.message || err, '. Falling back to full programmatic suite.');
+      // Guaranteed non-zero fallback: return programmatic cases for ALL enabled templates
+      const fallbackResult = this.generateCodeLevelTestCases(feature, true);
+      const finalCases = fallbackResult.test_cases.length > 0 ? fallbackResult.test_cases : programmaticResult.test_cases;
+      const finalCoverage = fallbackResult.coverage.length > 0 ? fallbackResult.coverage : programmaticResult.coverage;
+
+      return {
+        test_cases: finalCases.map((tc, index) => ({
+          ...tc,
+          id: `TC-${feature.id.toUpperCase()}-${String(index + 1).padStart(3, '0')}`
+        })),
+        coverage: finalCoverage
+      };
     }
   }
 
@@ -839,7 +857,7 @@ This is a known compatibility issue between certain GPU/graphics driver configur
   // Custom OpenAI/DeepSeek generation
   private async generateOnlineCustom(prompt: string, systemInstruction: string): Promise<TestResult> {
     try {
-      const response = await fetch(`${this.config.openaiBaseUrl}/chat/completions`, {
+      let response = await fetch(`${this.config.openaiBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -857,25 +875,107 @@ This is a known compatibility issue between certain GPU/graphics driver configur
         }),
       });
 
+      // If provider or model (e.g. DeepSeek R1 / deepseek-reasoner or custom proxies) errors out on response_format, retry without it
+      if (!response.ok) {
+        const firstErr = await response.json().catch(() => ({}));
+        console.warn(`Initial API call with response_format failed (${response.status}): ${firstErr?.error?.message || response.statusText}. Retrying without response_format parameter...`);
+        
+        response = await fetch(`${this.config.openaiBaseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.config.openaiApiKey}`
+          },
+          body: JSON.stringify({
+            model: this.config.openaiModel,
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: prompt }
+            ],
+            temperature: this.config.temperature,
+            max_tokens: this.config.maxTokens
+          }),
+        });
+      }
+
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error?.message || response.statusText);
       }
 
       const data = await response.json();
-      const rawText = data.choices[0].message.content;
+      const rawText = data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content
+        : '';
+
+      if (!rawText || rawText.trim() === '') {
+        throw new Error('Model returned empty response content.');
+      }
+
       return this.parseAndCleanJson(rawText);
     } catch (err: any) {
       throw new Error(`Cloud API (${this.config.openaiModel}) generation failed: ${err.message}`);
     }
   }
 
+  // Fallback plain-text test case parser when LLM does not return valid JSON
+  private parsePlainTextTestCases(text: string): any[] {
+    const cases: any[] = [];
+    const blocks = text.split(/(?=(?:Test Case|Case|TC-|\b\d+\.|\bTitle:))/i);
+    
+    blocks.forEach((block, idx) => {
+      const trimmed = block.trim();
+      if (!trimmed || trimmed.length < 15) return;
+
+      let title = `Test Case ${idx + 1}`;
+      const titleMatch = trimmed.match(/(?:title|test case|case)\s*[:\-]?\s*([^\n\r]+)/i) || trimmed.match(/^(?:TC-\d+|\d+\.)\s*([^\n\r]+)/m);
+      if (titleMatch && titleMatch[1]) {
+        title = titleMatch[1].trim().replace(/^["']|["']$/g, '');
+      }
+
+      const steps: string[] = [];
+      const stepLines = trimmed.split('\n');
+      stepLines.forEach(line => {
+        const stepMatch = line.match(/(?:step\s*\d+|\d+\.)\s*[:\-]?\s*([^\n\r]+)/i);
+        if (stepMatch && stepMatch[1]) {
+          steps.push(stepMatch[1].trim());
+        }
+      });
+
+      let expected = 'System performs as expected.';
+      const expectedMatch = trimmed.match(/(?:expected|result)\s*[:\-]?\s*([^\n\r]+)/i);
+      if (expectedMatch && expectedMatch[1]) {
+        expected = expectedMatch[1].trim();
+      }
+
+      let preconditions: string[] = [];
+      const preMatch = trimmed.match(/(?:precondition|prerequisite)\s*[:\-]?\s*([^\n\r]+)/i);
+      if (preMatch && preMatch[1]) {
+        preconditions = [preMatch[1].trim()];
+      }
+
+      cases.push({
+        id: `TC-${idx + 1}`,
+        title,
+        type: 'positive',
+        preconditions,
+        steps: steps.length > 0 ? steps : ['Execute scenario validation steps'],
+        expected
+      });
+    });
+
+    return cases;
+  }
+
   // Helper to parse and clean response JSON string
   private parseAndCleanJson(rawText: string): TestResult {
     let cleaned = rawText.trim();
     
+    // Proactively strip <think>...</think> reasoning blocks (DeepSeek-R1 / Qwen reasoning models)
+    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
     // 1. Strip markdown code blocks if any
-    if (cleaned.startsWith('```')) {
+    if (cleaned.includes('```')) {
       const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (match && match[1]) {
         cleaned = match[1].trim();
@@ -911,8 +1011,14 @@ This is a known compatibility issue between certain GPU/graphics driver configur
           .replace(/[\u201C\u201D]/g, '"'); // replace smart quotes
         parsed = JSON.parse(relaxedCleaned);
       } catch (innerErr) {
-        console.error('Failed to parse raw LLM response as JSON. Raw output:', rawText);
-        throw new Error(`Unable to parse JSON returned by model: ${err.message || 'Formatting error'}.`);
+        // Attempt plain text extraction fallback
+        const plainTextCases = this.parsePlainTextTestCases(rawText);
+        if (plainTextCases.length > 0) {
+          parsed = { test_cases: plainTextCases, coverage: ['Parsed from model response text'] };
+        } else {
+          console.error('Failed to parse raw LLM response as JSON. Raw output:', rawText);
+          throw new Error(`Unable to parse JSON returned by model: ${err.message || 'Formatting error'}.`);
+        }
       }
     }
 

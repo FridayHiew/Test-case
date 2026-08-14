@@ -33,17 +33,20 @@ async function generateContentWithRetry(ai: any, params: {
   config?: any;
   preferredModel?: string;
 }) {
-  const models = [
+  const candidateModels = [
     params.preferredModel || 'gemini-3.6-flash',
     'gemini-flash-latest',
     'gemini-3.1-flash-lite'
   ];
 
+  // Remove duplicates while preserving priority order
+  const models = Array.from(new Set(candidateModels));
+
   let lastError: any = null;
 
   for (const model of models) {
     let delay = 1000;
-    const maxRetries = 3;
+    const maxRetries = 2;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -60,17 +63,27 @@ async function generateContentWithRetry(ai: any, params: {
         const errMsg = error.message || String(error);
         const statusCode = error.status || error.statusCode || (error.error && error.error.code);
         
-        const isTransient = statusCode === 503 || 
-                            statusCode === 429 || 
-                            errMsg.includes('503') || 
-                            errMsg.includes('429') || 
-                            errMsg.toLowerCase().includes('high demand') || 
-                            errMsg.toLowerCase().includes('temporary') ||
-                            errMsg.toLowerCase().includes('unavailable') ||
-                            errMsg.toLowerCase().includes('rate limit');
+        const isQuotaExhausted = statusCode === 429 ||
+                                 errMsg.includes('429') ||
+                                 errMsg.toLowerCase().includes('quota') ||
+                                 errMsg.toLowerCase().includes('resource_exhausted');
 
-        if (isTransient && attempt < maxRetries) {
-          console.warn(`[Gemini API] Transient error on model "${model}" (attempt ${attempt}/${maxRetries}): ${errMsg}. Retrying in ${delay}ms...`);
+        const isNotFound = statusCode === 404 ||
+                           errMsg.includes('404') ||
+                           errMsg.toLowerCase().includes('not_found') ||
+                           errMsg.toLowerCase().includes('no longer available');
+
+        const isTransient503 = statusCode === 503 || 
+                               errMsg.includes('503') || 
+                               errMsg.toLowerCase().includes('high demand') || 
+                               errMsg.toLowerCase().includes('temporary') ||
+                               errMsg.toLowerCase().includes('unavailable');
+
+        if (isQuotaExhausted || isNotFound) {
+          console.warn(`[Gemini API] Model "${model}" unavailable (${isQuotaExhausted ? 'Quota Limit' : 'Not Found'}). Switching to next model...`);
+          break; // Immediately switch to next candidate model
+        } else if (isTransient503 && attempt < maxRetries) {
+          console.warn(`[Gemini API] Transient 503 on model "${model}" (attempt ${attempt}/${maxRetries}): ${errMsg}. Retrying in ${delay}ms...`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           delay *= 2;
         } else {
