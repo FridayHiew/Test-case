@@ -623,9 +623,9 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
       let aiResult: TestResult;
 
       if (this.config.aiMode === 'transformersjs') {
-        aiResult = await this.generateTransformersJsSimulated(prompt, systemInstruction);
+        aiResult = await this.generateTransformersJs(prompt, systemInstruction);
       } else if (this.config.aiMode === 'desktop') {
-        aiResult = await this.generateDesktopSimulated(prompt, systemInstruction);
+        aiResult = await this.generateDesktop(prompt, systemInstruction);
       } else if (this.config.aiMode === 'webllm') {
         aiResult = await this.generateWebLlm(prompt, systemInstruction);
       } else if (this.config.aiMode === 'offline') {
@@ -802,61 +802,147 @@ Rules:
 `;
   }
 
-  // Option 1: Transformers.js (CPU WASM/WebGPU) Simulation.
-  // Performs realistic WASM multi-threaded steps and then proxies the request to the high-performance Gemini cloud endpoint
-  private async generateTransformersJsSimulated(prompt: string, systemInstruction: string): Promise<TestResult> {
+  // Option 1: Transformers.js (CPU WASM/WebGPU) Real Local Execution.
+  // Downloads quantized model parameters into standard browser IndexedDB storage and performs local browser-side inference.
+  private async generateTransformersJs(prompt: string, systemInstruction: string): Promise<TestResult> {
     try {
       if (this.onProgress) {
-        this.onProgress('[Transformers.js] Booting ONNX Runtime WebAssembly core...', 5);
-        await new Promise(r => setTimeout(r, 400));
-        this.onProgress('[Transformers.js] Spawning 4 background CPU Web Worker threads...', 25);
-        await new Promise(r => setTimeout(r, 600));
-        this.onProgress('[Transformers.js] Loading quantized model parameters into memory (1.2GB)...', 55);
-        await new Promise(r => setTimeout(r, 850));
-        this.onProgress('[Transformers.js] Ready. Performing multi-threaded WASM-SIMD matrix calculation...', 85);
-        await new Promise(r => setTimeout(r, 500));
-        this.onProgress('[Transformers.js] Math complete! Formatting test-case array structure...', 100);
+        this.onProgress('[Transformers.js] Initiating WebAssembly runtime context...', 5);
       }
-      // Query the built-in fast Gemini cloud proxy to retrieve highly polished real-world test cases
-      const cloudResult = await this.generateBuiltIn(prompt, systemInstruction);
       
-      // Inject meta labels to demonstrate the simulation origin
+      const { pipeline } = await import('@huggingface/transformers');
+      const modelId = this.config.webllmModel || 'Xenova/Qwen1.5-0.5B-Chat';
+      
+      if (this.onProgress) {
+        this.onProgress(`[Transformers.js] Loading local model [${modelId}] into browser (caches weights on first run)...`, 20);
+      }
+      
+      const generator = await pipeline('text-generation', modelId, {
+        progress_callback: (data: any) => {
+          if (data.status === 'downloading' && this.onProgress) {
+            const pct = Math.round((data.loaded / data.total) * 100);
+            this.onProgress(`[Transformers.js] Downloading weights: ${data.file.substring(data.file.lastIndexOf('/') + 1)} (${pct}%)`, Math.min(20 + Math.round(pct * 0.6), 80));
+          } else if (data.status === 'done' && this.onProgress) {
+            this.onProgress(`[Transformers.js] Successfully loaded ${data.file.substring(data.file.lastIndexOf('/') + 1)}`, 80);
+          }
+        }
+      });
+      
+      if (this.onProgress) {
+        this.onProgress('[Transformers.js] Execution pipeline ready. Running local inference...', 85);
+      }
+      
+      const messages = [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt }
+      ];
+      
+      const output = await generator(messages, {
+        max_new_tokens: this.config.maxTokens || 1024,
+        temperature: this.config.temperature || 0.7,
+        do_sample: this.config.temperature > 0,
+        return_full_text: false,
+      });
+      
+      const generatedText = Array.isArray(output) 
+        ? (output[0]?.generated_text || '') 
+        : ((output as any).generated_text || '');
+        
+      if (this.onProgress) {
+        this.onProgress('[Transformers.js] Local generation complete! Formatting structured test cases...', 100);
+      }
+      
+      const rawText = typeof generatedText === 'string' ? generatedText : JSON.stringify(generatedText);
+      return {
+        ...this.parseAndCleanJson(rawText),
+        test_cases: (this.parseAndCleanJson(rawText).test_cases || []).map((tc: any) => ({
+          ...tc,
+          title: `${tc.title} (Transformers.js Local)`
+        }))
+      };
+    } catch (err: any) {
+      console.error('Transformers.js local execution failed:', err);
+      if (this.onProgress) {
+        this.onProgress('[Transformers.js] Hardware failure or connection blocked. Falling back to secure cloud connection...', 90);
+      }
+      const cloudResult = await this.generateBuiltIn(prompt, systemInstruction);
       return {
         test_cases: cloudResult.test_cases.map(tc => ({
           ...tc,
-          title: `${tc.title} (ONNX WASM)`
+          title: `${tc.title} (ONNX WASM Fallback)`
         })),
-        coverage: [...cloudResult.coverage, 'WASM execution stack verification completed']
+        coverage: [...cloudResult.coverage, 'Browser CPU memory fallback activated due to runtime error: ' + (err.message || 'unknown')]
       };
-    } catch (err: any) {
-      throw new Error(`Transformers.js WASM engine failed: ${err.message || 'Out of virtual memory or multi-threading block'}`);
     }
   }
 
-  // Option 3: Standalone Desktop Host (Native llama.cpp CPU/GPU) Simulation.
-  // Performs high-performance desktop native pipeline logs and proxies to fetch the actual cases
-  private async generateDesktopSimulated(prompt: string, systemInstruction: string): Promise<TestResult> {
-    try {
-      if (this.onProgress) {
-        this.onProgress('[Tauri Desktop] Opening IPC (Inter-Process Communication) native socket...', 10);
-        await new Promise(r => setTimeout(r, 350));
-        this.onProgress('[Tauri Desktop] Requesting native GPU memory allocation (AVX512 & CUDA optimized)...', 45);
-        await new Promise(r => setTimeout(r, 500));
-        this.onProgress('[Tauri Desktop] Direct memory copy completed. Calling native llama.cpp execution thread...', 80);
-        await new Promise(r => setTimeout(r, 450));
-        this.onProgress('[Tauri Desktop] Native inference execution completed successfully!', 100);
+  // Option 3: Standalone Desktop Host (Native llama.cpp / Ollama) Real Local Connection.
+  // Scans for active local native server runtimes (port 8080 or port 11434) on the host machine.
+  private async generateDesktop(prompt: string, systemInstruction: string): Promise<TestResult> {
+    const localEndpoints = [
+      'http://localhost:8080/v1', // Standard llama.cpp / llama-server
+      'http://localhost:11434/v1', // Native Ollama API OpenAI Compatibility
+      'http://127.0.0.1:8080/v1',
+      'http://127.0.0.1:11434/v1'
+    ];
+    
+    let lastError: any = null;
+    
+    for (const endpoint of localEndpoints) {
+      try {
+        if (this.onProgress) {
+          this.onProgress(`[Desktop Native] Scanning for active local pipeline on ${endpoint}...`, 20);
+        }
+        
+        const response = await fetch(`${endpoint}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: this.config.ollamaModel || 'qwen2.5-coder',
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: prompt }
+            ],
+            temperature: this.config.temperature || 0.7,
+            max_tokens: this.config.maxTokens || 1024,
+            response_format: { type: 'json_object' }
+          }),
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const rawText = data.choices[0]?.message?.content || '';
+          if (this.onProgress) {
+            this.onProgress('[Desktop Native] Direct hardware socket connection established! Structuring test suite...', 100);
+          }
+          return {
+            ...this.parseAndCleanJson(rawText),
+            test_cases: (this.parseAndCleanJson(rawText).test_cases || []).map((tc: any) => ({
+              ...tc,
+              title: `${tc.title} (Local Native Host)`
+            }))
+          };
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Local endpoint ${endpoint} was unreachable:`, err?.message || err);
       }
-      const cloudResult = await this.generateBuiltIn(prompt, systemInstruction);
-      return {
-        test_cases: cloudResult.test_cases.map(tc => ({
-          ...tc,
-          title: `${tc.title} (Native Host)`
-        })),
-        coverage: [...cloudResult.coverage, 'Native CUDA/Metal hardware compliance verified']
-      };
-    } catch (err: any) {
-      throw new Error(`Desktop Host Native Connection refused: Ensure your local desktop client or Tauri IPC process is launched.`);
     }
+    
+    if (this.onProgress) {
+      this.onProgress('[Desktop Native] No local native server responding. Falling back to secure cloud execution...', 80);
+    }
+    
+    const cloudResult = await this.generateBuiltIn(prompt, systemInstruction);
+    return {
+      test_cases: cloudResult.test_cases.map(tc => ({
+        ...tc,
+        title: `${tc.title} (Native Host Cloud Fallback)`
+      })),
+      coverage: [...cloudResult.coverage, 'Note: Local llama-server was offline, routed through secure cloud channel']
+    };
   }
 
   // Local Browser WebLLM generation
