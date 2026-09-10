@@ -76,7 +76,7 @@ export interface E2EJourney {
 }
 
 export interface AIConfig {
-  aiMode: 'offline' | 'online' | 'webllm';
+  aiMode: 'offline' | 'online' | 'webllm' | 'transformersjs' | 'desktop';
   // Offline Ollama Config
   ollamaUrl: string;
   ollamaModel: string;
