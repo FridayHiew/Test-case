@@ -1334,35 +1334,75 @@ This is a known compatibility issue between certain GPU/graphics driver configur
 
   // Local Ollama generation
   private async generateOffline(prompt: string, systemInstruction: string): Promise<TestResult> {
-    try {
-      const response = await fetch(`${this.config.ollamaUrl}/api/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.config.ollamaModel,
-          prompt: prompt,
-          system: systemInstruction,
-          stream: false,
-          options: {
-            temperature: this.config.temperature,
-            num_predict: this.config.maxTokens,
-          },
-          format: 'json'
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Ollama response error (${response.status}): ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      const rawText = data.response;
-      return this.parseAndCleanJson(rawText);
-    } catch (err: any) {
-      throw new Error(`Local Ollama generation failed. Ensure Ollama service is running with model [${this.config.ollamaModel}]. Error: ${err.message}`);
+    const rawOllamaUrl = (this.config.ollamaUrl || 'http://localhost:11434').trim().replace(/\/+$/, '');
+    
+    // Candidate endpoints in case of IPv6/IPv4 localhost resolution differences or local bridge
+    const endpointsToTry = [rawOllamaUrl];
+    if (rawOllamaUrl.includes('localhost')) {
+      endpointsToTry.push(rawOllamaUrl.replace('localhost', '127.0.0.1'));
+    } else if (rawOllamaUrl.includes('127.0.0.1')) {
+      endpointsToTry.push(rawOllamaUrl.replace('127.0.0.1', 'localhost'));
     }
+    // Also try local bridge on 11435 if default 11434 was configured
+    if (rawOllamaUrl.includes('11434')) {
+      endpointsToTry.push(rawOllamaUrl.replace('11434', '11435'));
+    }
+
+    let lastError: any = null;
+
+    for (const url of endpointsToTry) {
+      try {
+        const response = await fetch(`${url}/api/generate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: this.config.ollamaModel,
+            prompt: prompt,
+            system: systemInstruction,
+            stream: false,
+            options: {
+              temperature: this.config.temperature,
+              num_predict: this.config.maxTokens,
+            },
+            format: 'json'
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Ollama response error (${response.status}): ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const rawText = data.response;
+        return this.parseAndCleanJson(rawText);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Attempt to generate with Ollama at ${url} failed:`, err?.message || err);
+      }
+    }
+
+    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    const isHttpTarget = rawOllamaUrl.toLowerCase().startsWith('http://');
+    const isLocalTarget = /localhost|127\.0\.0\.1|0\.0\.0\.0|::1/.test(rawOllamaUrl);
+
+    if (isHttps && isHttpTarget && isLocalTarget) {
+      throw new Error(`Connection to local Ollama (${rawOllamaUrl}) was blocked by browser security (Mixed Content & Private Network Access policy).
+
+Because your PWA is running on HTTPS (GitHub Pages), the browser prevents web pages from connecting to local HTTP services unless explicitly permitted.
+
+QUICK FIXES:
+1. Allow Insecure Content (Instant): In your browser/PWA window, click the icon next to the address/app title -> "Site settings" -> set "Insecure content" to "Allow" -> reload.
+2. Enable Ollama CORS: Start Ollama with OLLAMA_ORIGINS="*"
+   - Windows PowerShell: $env:OLLAMA_ORIGINS="*"; ollama serve
+   - Mac: launchctl setenv OLLAMA_ORIGINS "*" (then restart Ollama app)
+   - Linux: Environment="OLLAMA_ORIGINS=*" in systemd
+3. Run Local Bridge: Run "npm run bridge" in your project directory.
+4. Or switch to "Transformers.js (WASM)" under AI Core Settings for 100% in-browser offline generation without needing local servers.`);
+    }
+
+    throw new Error(`Local Ollama generation failed (${rawOllamaUrl}). Ensure Ollama service is running with model [${this.config.ollamaModel}]. Error: ${lastError?.message || 'Connection refused'}`);
   }
 
   // Built-in Gemini generation

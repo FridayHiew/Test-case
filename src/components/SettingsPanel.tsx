@@ -558,6 +558,21 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
                 >
                   127.0.0.1
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOllamaUrl('http://localhost:11435');
+                    saveConfig({ ollamaUrl: 'http://localhost:11435' });
+                  }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition font-mono ${
+                    ollamaUrl === 'http://localhost:11435'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                  title="Connect via local CORS proxy bridge (npm run bridge)"
+                >
+                  bridge:11435
+                </button>
               </div>
             </div>
             <input
@@ -571,11 +586,28 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
               placeholder="http://localhost:11434"
             />
             {typeof window !== 'undefined' && window.location.protocol === 'https:' && (
-              <div className="mt-1.5 p-2 bg-amber-50/80 border border-amber-200/70 rounded-lg text-[11px] text-amber-800 flex items-start space-x-1.5 leading-relaxed">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>HTTPS PWA Notice:</strong> Installed from GitHub Pages over HTTPS. If connecting to local HTTP fails, use the <strong>Test AI Connection & Debugger</strong> below to view the browser policy diagnostics.
-                </span>
+              <div className="mt-2 p-3 bg-amber-50/90 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-2">
+                <div className="flex items-start space-x-2 font-semibold">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>Connecting HTTPS PWA (GitHub Pages) to Local Ollama:</span>
+                </div>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  When accessing from HTTPS (like GitHub Pages or installed PWA), browsers block HTTP localhost requests by default (Mixed Content & CORS). Use any of these solutions:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] pt-1">
+                  <div className="bg-white/80 p-2 rounded border border-amber-200">
+                    <strong className="text-slate-800">Option 1 (No terminal): Allow Insecure Content</strong>
+                    <p className="text-slate-600 text-[10px] mt-0.5">
+                      Click the icon left of the browser/PWA URL &rarr; <em>Site settings</em> &rarr; set <em>&quot;Insecure content&quot;</em> to <strong>Allow</strong> &rarr; Refresh.
+                    </p>
+                  </div>
+                  <div className="bg-white/80 p-2 rounded border border-amber-200">
+                    <strong className="text-slate-800">Option 2: Run Included Local Bridge</strong>
+                    <p className="text-slate-600 text-[10px] mt-0.5">
+                      In terminal run <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-600">npm run bridge</code> and click the <strong>bridge:11435</strong> button above.
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
