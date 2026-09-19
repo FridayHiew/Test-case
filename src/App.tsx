@@ -10,9 +10,12 @@ import SettingsPanel from './components/SettingsPanel';
 import SrsProcessor from './components/SrsProcessor';
 import PwaPrompt from './components/PwaPrompt';
 import E2EJourneyManager from './components/E2EJourneyManager';
+import { InstallModal } from './components/InstallModal';
+import { usePWAInstall } from './hooks/usePWAInstall';
 import { 
   Sparkles, Folder, Database, Settings, Cpu, Cloud, 
-  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle, FileText, LayoutGrid, GitFork
+  FileSpreadsheet, Activity, Wifi, WifiOff, HelpCircle, FileText, LayoutGrid, GitFork,
+  Download
 } from 'lucide-react';
 
 const DEFAULT_CONFIG: AIConfig = {
@@ -35,6 +38,21 @@ export default function App() {
   const [cacheCount, setCacheCount] = useState<number>(0);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+
+  // PWA Installation state
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+  const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
+
+  const handleInstallClick = async () => {
+    if (isInstallable) {
+      const outcome = await install();
+      if (!outcome) {
+        setShowInstallModal(true);
+      }
+    } else {
+      setShowInstallModal(true);
+    }
+  };
 
   // Initialize DB & LLM instances
   const db = useMemo(() => new TestGenDB(), []);
@@ -142,8 +160,11 @@ export default function App() {
                 <FileSpreadsheet className="w-6 h-6" />
               </div>
               <div>
-                <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight flex items-center">
-                  AI Test Case Generator
+                <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight flex items-center flex-wrap gap-2">
+                  <span>AI Test Case Generator</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold font-mono bg-blue-50 text-blue-700 border border-blue-200">
+                    v1.01
+                  </span>
                 </h1>
                 <p className="text-[10px] sm:text-xs text-slate-400 font-medium">
                   Dual-Engine AI Productivity Suite with PWA & IndexedDB Caching
@@ -152,7 +173,20 @@ export default function App() {
             </div>
 
             {/* Status Badges */}
-            <div className="hidden md:flex items-center space-x-3 text-xs font-semibold">
+            <div className="flex items-center space-x-2 sm:space-x-3 text-xs font-semibold">
+              {/* Install PWA Button (before "Online", visible only if this PWA hasn't been installed into the device) */}
+              {!isInstalled && (
+                <button
+                  type="button"
+                  onClick={handleInstallClick}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:from-blue-800 active:to-indigo-800 text-white font-semibold rounded-full shadow-xs hover:shadow transition transform active:scale-95 cursor-pointer"
+                  title="Install AI Test Case Generator v1.01 into your device"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Install App</span>
+                </button>
+              )}
+
               {/* Network Status */}
               <div className={`flex items-center px-2.5 py-1 rounded-full border ${
                 isOnline 
@@ -173,7 +207,7 @@ export default function App() {
               </div>
 
               {/* Selected Model Status */}
-              <div className={`flex items-center px-2.5 py-1 rounded-full border ${
+              <div className={`hidden md:flex items-center px-2.5 py-1 rounded-full border ${
                 config.aiMode === 'webllm'
                   ? 'bg-indigo-50 text-indigo-700 border-indigo-100'
                   : config.aiMode === 'offline'
@@ -368,6 +402,15 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* PWA Device Installation Instructions Modal */}
+      <InstallModal
+        isOpen={showInstallModal}
+        onClose={() => setShowInstallModal(false)}
+        isInstallable={isInstallable}
+        onInstall={install}
+        isIOS={isIOS}
+      />
     </div>
   );
 }

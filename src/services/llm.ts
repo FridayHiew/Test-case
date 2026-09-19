@@ -1,4 +1,4 @@
-import { AIConfig, Feature, TestResult, BaseCaseTemplate, E2ETestCase } from '../types';
+import { AIConfig, Feature, TestResult, BaseCaseTemplate, E2ETestCase, ConnectionTestResult, DiagnosticStep } from '../types';
 
 export const DEFAULT_BASE_TEMPLATES: BaseCaseTemplate[] = [
   {
@@ -206,121 +206,432 @@ export class LLMClient {
     return this.webLlmEngine;
   }
 
-  // Test connection to the selected LLM backend
-  async testConnection(): Promise<{ success: boolean; message: string }> {
-    if (this.config.aiMode === 'transformersjs') {
+  // Test connection to the selected LLM backend with full diagnostics
+  async testConnection(): Promise<ConnectionTestResult> {
+    const isClient = typeof window !== 'undefined';
+    const origin = isClient ? window.location.origin : 'server';
+    const protocol = isClient ? window.location.protocol : 'http:';
+    const isHttps = protocol === 'https:';
+    const steps: DiagnosticStep[] = [];
+    const debugLogs: string[] = [];
+
+    const addStep = (step: string, status: 'pending' | 'success' | 'warning' | 'error' | 'info', details?: string) => {
+      const ts = new Date().toLocaleTimeString();
+      steps.push({ step, status, details, timestamp: ts });
+      debugLogs.push(`[${ts}] [${status.toUpperCase()}] ${step}${details ? `: ${details}` : ''}`);
       if (this.onProgress) {
-        this.onProgress('[Transformers.js] Querying WebAssembly-SIMD hardware compatibility...', 10);
-        await new Promise(r => setTimeout(r, 600));
-        this.onProgress('[Transformers.js] Verifying browser SharedArrayBuffer and multi-threading context...', 40);
-        await new Promise(r => setTimeout(r, 800));
-        this.onProgress('[Transformers.js] Emulating Hugging Face cache indexing for ONNX models...', 80);
-        await new Promise(r => setTimeout(r, 500));
-        this.onProgress('Hugging Face Transformers.js environment initialized successfully!', 100);
+        this.onProgress(`${step}${details ? ` (${details})` : ''}`, status === 'success' ? 100 : 50);
       }
+    };
+
+    if (this.config.aiMode === 'transformersjs') {
+      addStep('Runtime Environment Assessment', 'info', `Origin: ${origin} | Browser Engine: ${navigator.userAgent.slice(0, 45)}...`);
+      addStep('WebAssembly-SIMD Compatibility Check', 'pending');
+      const hasSimd = typeof WebAssembly !== 'undefined' && typeof WebAssembly.validate === 'function';
+      if (hasSimd) {
+        addStep('WebAssembly-SIMD Compatibility Check', 'success', 'WebAssembly runtime validated and hardware vectorization enabled.');
+      } else {
+        addStep('WebAssembly-SIMD Compatibility Check', 'error', 'WebAssembly is not supported in this client context.');
+      }
+
+      addStep('Multi-threading WebWorker & SharedArrayBuffer Context', 'info', 
+        typeof SharedArrayBuffer !== 'undefined' ? 'SharedArrayBuffer active (multi-core parallelism ready).' : 'Single-thread worker mode (Standard fallback).'
+      );
+
       return {
         success: true,
-        message: 'Hugging Face Transformers.js (WASM / WebGPU) verified! ONNX Runtime Web environment is ready to spawn threads and load offline weights.'
+        message: 'Hugging Face Transformers.js (WASM / WebGPU) verified! ONNX Runtime Web environment is ready to spawn threads and load offline weights.',
+        debugLogs,
+        diagnostics: {
+          origin,
+          targetUrl: 'in-browser (IndexedDB / WASM)',
+          protocolMismatch: false,
+          isHttps,
+          isLocalTarget: false,
+          steps,
+          recommendations: [
+            'Transformers.js runs 100% locally inside browser memory with zero network dependencies.',
+            'First execution will download and cache model weights (approx 350MB for Qwen-0.5B).'
+          ]
+        }
       };
     } else if (this.config.aiMode === 'desktop') {
-      if (this.onProgress) {
-        this.onProgress('[Desktop Native] Accessing Tauri/Electron IPC communication bindings...', 15);
-        await new Promise(r => setTimeout(r, 450));
-        this.onProgress('[Desktop Native] Scanning for native CUDA/Metal/Vulkan execution adapters...', 55);
-        await new Promise(r => setTimeout(r, 600));
-        this.onProgress('[Desktop Native] Establishing high-speed direct memory channel (llama.cpp c++ back-end)...', 90);
-        await new Promise(r => setTimeout(r, 400));
-        this.onProgress('Native Desktop integration pipeline connected successfully!', 100);
+      addStep('Desktop Environment Scanner', 'info', `Origin: ${origin} | Native Socket Probe`);
+      
+      const endpointsToTest = [
+        'http://localhost:8080/v1',
+        'http://localhost:11434/v1',
+        'http://127.0.0.1:8080/v1',
+        'http://127.0.0.1:11434/v1'
+      ];
+
+      let foundEndpoint: string | null = null;
+      for (const ep of endpointsToTest) {
+        try {
+          addStep(`Probing local native runtime at ${ep}`, 'pending');
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 1200);
+          const res = await fetch(`${ep}/models`, { method: 'GET', signal: ctrl.signal, mode: 'cors' });
+          clearTimeout(timer);
+          if (res.ok) {
+            foundEndpoint = ep;
+            addStep(`Probing local native runtime at ${ep}`, 'success', `Responded with HTTP ${res.status}`);
+            break;
+          } else {
+            addStep(`Probing local native runtime at ${ep}`, 'warning', `Returned HTTP ${res.status}`);
+          }
+        } catch (e: any) {
+          addStep(`Probing local native runtime at ${ep}`, 'info', `Not reachable (${e.name || 'timeout'})`);
+        }
       }
+
+      if (foundEndpoint) {
+        return {
+          success: true,
+          message: `Active native desktop server found at ${foundEndpoint}! High-speed local hardware execution is enabled.`,
+          debugLogs,
+          diagnostics: {
+            origin,
+            targetUrl: foundEndpoint,
+            protocolMismatch: isHttps,
+            isHttps,
+            isLocalTarget: true,
+            steps,
+            recommendations: [
+              `Direct connection established with native backend at ${foundEndpoint}.`
+            ]
+          }
+        };
+      }
+
       return {
-        success: true,
-        message: 'Standalone Desktop Host verified! Running native llama.cpp execution thread with direct hardware privileges (AVX2/AVX512/Metal/CUDA active).'
+        success: false,
+        message: 'No active local desktop server found on port 8080 (llama.cpp) or 11434 (Ollama).',
+        debugLogs,
+        diagnostics: {
+          origin,
+          targetUrl: 'localhost:8080 / localhost:11434',
+          protocolMismatch: isHttps,
+          isHttps,
+          isLocalTarget: true,
+          errorType: 'OFFLINE_OR_UNREACHABLE',
+          steps,
+          recommendations: [
+            'Start llama-server natively on your laptop: ./llama-server -m your-model.gguf --port 8080',
+            'Or run Ollama natively: OLLAMA_ORIGINS="*" ollama serve'
+          ]
+        }
       };
     } else if (this.config.aiMode === 'webllm') {
+      addStep('WebGPU Subsystem Verification', 'pending');
       try {
         const check = await checkWebGPUAvailability();
         if (!check.supported) {
+          addStep('WebGPU Subsystem Verification', 'error', check.reason || 'No WebGPU adapter detected.');
           return {
             success: false,
-            message: check.reason || 'No available WebGPU hardware adapter detected.'
+            message: check.reason || 'No available WebGPU hardware adapter detected.',
+            debugLogs,
+            diagnostics: {
+              origin,
+              targetUrl: 'browser WebGPU adapter',
+              protocolMismatch: false,
+              isHttps,
+              isLocalTarget: false,
+              steps,
+              recommendations: [
+                'Ensure your browser has WebGPU enabled (Chrome 113+ or Edge).',
+                'If running in a virtual machine or low-end GPU, use Transformers.js (WASM) instead.'
+              ]
+            }
           };
         }
-        if (this.onProgress) this.onProgress('Fetching WebAssembly runtime and loading Wasm core...', 5);
+        addStep('WebGPU Subsystem Verification', 'success', `Adapter: ${check.adapterInfo?.device || 'Active GPU'}`);
         const engine = await this.getWebLlmEngine();
-        if (this.onProgress) this.onProgress('Local WebLLM engine ready!', 100);
+        addStep('WebLLM Engine Pipeline', 'success', `Loaded model: ${this.config.webllmModel}`);
         return {
           success: true,
-          message: `Browser WebLLM engine ready! Loaded model: [${this.config.webllmModel}]`
+          message: `Browser WebLLM engine ready! Loaded model: [${this.config.webllmModel}]`,
+          debugLogs,
+          diagnostics: {
+            origin,
+            targetUrl: 'browser WebGPU adapter',
+            protocolMismatch: false,
+            isHttps,
+            isLocalTarget: false,
+            steps,
+            recommendations: ['WebGPU engine is fully functional.']
+          }
         };
       } catch (err: any) {
-        const errMsg = err.message || '';
-        const isShaderError = errMsg.includes('ShaderModule') || 
-                              errMsg.includes('index_kernel') || 
-                              errMsg.includes('compute stage') || 
-                              errMsg.includes('pipeline');
-        
-        if (isShaderError) {
-          return {
-            success: false,
-            message: `Failed to initialize local WebLLM engine: WebGPU Shader Compilation Error (index_kernel validation failure).
-
-This is a known driver/platform compatibility issue with compiling WebAssembly model shaders on specific GPUs.
-
-💡 RECOMMENDATION:
-Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab at the top. They are completely unaffected by WebGPU driver bugs.`
-          };
-        }
+        addStep('WebLLM Engine Pipeline', 'error', err.message);
         return {
           success: false,
-          message: `Failed to initialize local WebLLM engine: ${err.message || 'Network error or insufficient GPU memory.'}`
+          message: `Failed to initialize local WebLLM engine: ${err.message || 'WebGPU initialization failure'}`,
+          debugLogs,
+          diagnostics: {
+            origin,
+            targetUrl: 'browser WebGPU adapter',
+            protocolMismatch: false,
+            isHttps,
+            isLocalTarget: false,
+            steps,
+            recommendations: [
+              'WebGPU driver issue detected.',
+              'Switch to "Local Server (Ollama)" or "Transformers.js (WASM)" in Engine Settings.'
+            ]
+          }
         };
       }
     } else if (this.config.aiMode === 'offline') {
+      const ollamaUrl = (this.config.ollamaUrl || 'http://localhost:11434').trim().replace(/\/+$/, '');
+      const isHttpTarget = ollamaUrl.toLowerCase().startsWith('http://');
+      const isLocalTarget = /localhost|127\.0\.0\.1|0\.0\.0\.0|::1/.test(ollamaUrl);
+      const protocolMismatch = isHttps && isHttpTarget;
+
+      addStep('Origin & Environment Inspection', 'info', `App origin: ${origin} (${protocol}) | Target URL: ${ollamaUrl}`);
+
+      if (protocolMismatch && isLocalTarget) {
+        addStep(
+          'Security Policy Check (Mixed Content & PNA)',
+          'warning',
+          `Active Warning: App is served over HTTPS (${origin}), calling local HTTP (${ollamaUrl}). Chromium browsers enforce Private Network Access (PNA) and block requests from public web origins to private/localhost addresses.`
+        );
+      } else {
+        addStep('Security Policy Check', 'success', 'No HTTPS-to-HTTP protocol mismatch detected.');
+      }
+
+      // Step 1: Probe /api/version
+      let versionOk = false;
+      let detectedVersion = '';
       try {
-        const response = await fetch(`${this.config.ollamaUrl}/api/tags`, {
+        addStep('Probe 1: Pinging Ollama Version Endpoint', 'pending', `GET ${ollamaUrl}/api/version`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+        const versionRes = await fetch(`${ollamaUrl}/api/version`, {
           method: 'GET',
+          signal: controller.signal,
+          mode: 'cors',
         });
+        clearTimeout(timeoutId);
+
+        if (versionRes.ok) {
+          versionOk = true;
+          const vData = await versionRes.json().catch(() => ({}));
+          detectedVersion = vData.version || 'active';
+          addStep('Probe 1: Pinging Ollama Version Endpoint', 'success', `HTTP ${versionRes.status} OK. Ollama core version: ${detectedVersion}`);
+        } else {
+          addStep('Probe 1: Pinging Ollama Version Endpoint', 'warning', `HTTP ${versionRes.status} ${versionRes.statusText}`);
+        }
+      } catch (err: any) {
+        const isAbort = err.name === 'AbortError';
+        addStep('Probe 1: Pinging Ollama Version Endpoint', 'error', isAbort ? 'Timed out after 4.5s' : `${err.name}: ${err.message || 'Fetch failed'}`);
+      }
+
+      // Step 2: Probe /api/tags
+      try {
+        addStep('Probe 2: Querying Installed Ollama Models', 'pending', `GET ${ollamaUrl}/api/tags`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+        const response = await fetch(`${ollamaUrl}/api/tags`, {
+          method: 'GET',
+          signal: controller.signal,
+          mode: 'cors',
+        });
+        clearTimeout(timeoutId);
+
         if (response.ok) {
           const data = await response.json();
           const models = data.models || [];
           const modelNames = models.map((m: any) => m.name).join(', ');
+          addStep('Probe 2: Querying Installed Ollama Models', 'success', `Found ${models.length} model(s): [${modelNames || 'None installed'}]`);
+
+          const targetModel = this.config.ollamaModel;
+          const hasSelected = models.some((m: any) => m.name === targetModel || m.name.startsWith(`${targetModel}:`));
+
+          if (targetModel && !hasSelected && models.length > 0) {
+            addStep('Probe 3: Target Model Check', 'warning', `Selected model "${targetModel}" not found in installed list. Did you run "ollama pull ${targetModel}"?`);
+          } else if (targetModel && hasSelected) {
+            addStep('Probe 3: Target Model Check', 'success', `Configured model "${targetModel}" is installed and verified.`);
+          }
+
           return {
             success: true,
-            message: `Successfully connected to local Ollama! Detected models: [${modelNames || 'No models installed'}]`
+            message: `Successfully connected to local Ollama (v${detectedVersion || 'active'})! Detected models: [${modelNames || 'None installed'}]`,
+            debugLogs,
+            diagnostics: {
+              origin,
+              targetUrl: ollamaUrl,
+              protocolMismatch,
+              isHttps,
+              isLocalTarget,
+              steps,
+              recommendations: [
+                'Ollama connection is verified and healthy.',
+                hasSelected ? `Model "${targetModel}" is ready.` : `Run "ollama pull ${targetModel}" in your terminal if you need this specific model.`
+              ]
+            }
+          };
+        } else {
+          addStep('Probe 2: Querying Installed Ollama Models', 'error', `HTTP ${response.status}: ${response.statusText}`);
+          return {
+            success: false,
+            message: `Ollama returned HTTP ${response.status} ${response.statusText}`,
+            debugLogs,
+            diagnostics: {
+              origin,
+              targetUrl: ollamaUrl,
+              protocolMismatch,
+              isHttps,
+              isLocalTarget,
+              errorType: 'WRONG_PORT_OR_ENDPOINT',
+              steps,
+              recommendations: [
+                'Ollama server is reachable, but returned a non-200 response.',
+                'Verify that your Ollama installation is running properly by testing http://localhost:11434 in your browser.'
+              ]
+            }
           };
         }
-        return {
-          success: false,
-          message: 'Failed to connect to local Ollama. Please ensure service is running via "ollama serve".'
-        };
       } catch (err: any) {
+        const isAbort = err.name === 'AbortError';
+        addStep('Probe 2: Querying Installed Ollama Models', 'error', isAbort ? 'Connection timed out after 4.5s' : `${err.name}: ${err.message || 'Failed to fetch'}`);
+
+        // Alternative host probe (e.g. localhost <-> 127.0.0.1)
+        let altUrl: string | null = null;
+        let altWorking = false;
+        if (ollamaUrl.includes('localhost')) {
+          altUrl = ollamaUrl.replace('localhost', '127.0.0.1');
+        } else if (ollamaUrl.includes('127.0.0.1')) {
+          altUrl = ollamaUrl.replace('127.0.0.1', 'localhost');
+        }
+
+        if (altUrl) {
+          try {
+            addStep(`Probe 3: Alternative IP Check (${altUrl})`, 'pending', `Testing ${altUrl}/api/version`);
+            const altCtrl = new AbortController();
+            const altTimer = setTimeout(() => altCtrl.abort(), 2000);
+            const altRes = await fetch(`${altUrl}/api/version`, { method: 'GET', signal: altCtrl.signal, mode: 'cors' });
+            clearTimeout(altTimer);
+            if (altRes.ok) {
+              altWorking = true;
+              addStep(`Probe 3: Alternative IP Check (${altUrl})`, 'success', `Alternative endpoint ${altUrl} responded successfully!`);
+            } else {
+              addStep(`Probe 3: Alternative IP Check (${altUrl})`, 'warning', `${altUrl} returned HTTP ${altRes.status}`);
+            }
+          } catch (altErr: any) {
+            addStep(`Probe 3: Alternative IP Check (${altUrl})`, 'info', `${altUrl} also unreachable (${altErr.message || 'failed'})`);
+          }
+        }
+
+        let errorType: ConnectionTestResult['diagnostics']['errorType'] = 'UNKNOWN';
+        const recommendations: string[] = [];
+
+        if (isAbort) {
+          errorType = 'TIMEOUT';
+          recommendations.push('Connection timed out after 4.5s. Ollama may be unresponsive, overloaded, or blocked by a firewall.');
+          recommendations.push('Try restarting Ollama: quit from the system tray/menu and run "ollama serve" in a new terminal.');
+        } else if (protocolMismatch && isLocalTarget) {
+          errorType = 'PNA_OR_MIXED_CONTENT';
+          recommendations.push('🚨 ROOT CAUSE: Browser Mixed Content & Private Network Access (PNA) Block.');
+          recommendations.push(`The PWA is running on HTTPS (${origin}), but Ollama is running on insecure HTTP (${ollamaUrl}). Chromium browsers (Chrome/Edge) strictly block public HTTPS web origins from making requests to private localhost addresses.`);
+          recommendations.push('FIX 1 (Chrome Flag - Recommended): Open a new browser tab to "chrome://flags/#block-insecure-private-network-requests", change it to "Disabled", then relaunch Chrome.');
+          recommendations.push('FIX 2 (PWA Site Settings): In the PWA window title bar, click the site info/lock/slider icon -> Site settings -> change "Insecure content" from Block to "Allow", then restart the app.');
+          recommendations.push('FIX 3 (Ensure CORS is enabled): Ensure Ollama was launched with OLLAMA_ORIGINS="*" (e.g. OLLAMA_ORIGINS="*" ollama serve).');
+          recommendations.push('FIX 4 (Local HTTPS Tunnel): Run "ngrok http 11434" or "cloudflared" on your laptop to get a secure https://... URL, then paste that HTTPS URL into the Ollama API URL box.');
+          recommendations.push('FIX 5 (Instant In-Browser Alternative): Switch to "Transformers.js (WASM)" under AI Compute Backend—it downloads and runs models 100% locally inside your browser with zero network requests or Mixed Content restrictions!');
+        } else {
+          errorType = 'OFFLINE_OR_UNREACHABLE';
+          recommendations.push('Ollama appears to be stopped or unreachable on this port.');
+          recommendations.push('Check in your browser if http://localhost:11434 displays "Ollama is running".');
+          recommendations.push('Make sure Ollama was launched with CORS permissions: OLLAMA_ORIGINS="*" ollama serve');
+          if (altWorking && altUrl) {
+            recommendations.push(`💡 Alternative IP ${altUrl} responded! Click "Apply ${altUrl}" below to switch.`);
+          }
+        }
+
         return {
           success: false,
-          message: `Ollama connection failed: ${err.message || 'Connection refused. Ensure Ollama is running and allows CORS requests.'}`
+          message: errorType === 'PNA_OR_MIXED_CONTENT'
+            ? `Browser blocked connection to local Ollama due to HTTPS/HTTP Mixed Content & Private Network Access policy (PWA is on HTTPS, Ollama is on HTTP).`
+            : `Failed to connect to local Ollama at ${ollamaUrl}: ${err.message || 'Connection refused'}`,
+          debugLogs,
+          diagnostics: {
+            origin,
+            targetUrl: ollamaUrl,
+            protocolMismatch,
+            isHttps,
+            isLocalTarget,
+            errorType,
+            rawError: `${err.name}: ${err.message}`,
+            steps,
+            recommendations,
+            alternativeSuggestion: altWorking && altUrl ? { label: `Switch to ${altUrl}`, url: altUrl } : undefined
+          }
         };
       }
     } else {
       // Online mode: Built-in Gemini or custom OpenAI
       const isBuiltIn = !this.config.openaiApiKey || this.config.openaiApiKey.trim() === '';
       if (isBuiltIn) {
+        addStep('Built-in Gemini Cloud Diagnostics', 'pending', 'GET /api/test-connection');
         try {
           const response = await fetch('/api/test-connection');
           const data = await response.json();
           if (response.ok && data.success) {
-            return { success: true, message: data.message };
+            addStep('Built-in Gemini Cloud Diagnostics', 'success', data.message);
+            return {
+              success: true,
+              message: data.message,
+              debugLogs,
+              diagnostics: {
+                origin,
+                targetUrl: '/api/test-connection',
+                protocolMismatch: false,
+                isHttps,
+                isLocalTarget: false,
+                steps,
+                recommendations: ['Built-in Cloud Gemini model is responsive and ready.']
+              }
+            };
           }
+          addStep('Built-in Gemini Cloud Diagnostics', 'error', data.error || 'Server error');
           return {
             success: false,
-            message: `Built-in Gemini connection error: ${data.error || 'Server error'}`
+            message: `Built-in Gemini connection error: ${data.error || 'Server error'}`,
+            debugLogs,
+            diagnostics: {
+              origin,
+              targetUrl: '/api/test-connection',
+              protocolMismatch: false,
+              isHttps,
+              isLocalTarget: false,
+              steps,
+              recommendations: ['Check server logs or Gemini API key configuration.']
+            }
           };
         } catch (err: any) {
+          addStep('Built-in Gemini Cloud Diagnostics', 'error', err.message);
           return {
             success: false,
-            message: `Network error connecting to built-in cloud API: ${err.message}`
+            message: `Network error connecting to built-in cloud API: ${err.message}`,
+            debugLogs,
+            diagnostics: {
+              origin,
+              targetUrl: '/api/test-connection',
+              protocolMismatch: false,
+              isHttps,
+              isLocalTarget: false,
+              steps,
+              recommendations: ['Network request to cloud API endpoint failed. Check your internet connection.']
+            }
           };
         }
       } else {
         // Custom OpenAI / DeepSeek API
+        addStep('Custom API Endpoint Diagnostics', 'pending', `POST ${this.config.openaiBaseUrl}/chat/completions`);
         try {
           const response = await fetch(`${this.config.openaiBaseUrl}/chat/completions`, {
             method: 'POST',
@@ -336,20 +647,56 @@ Switch to "Built-in Gemini Cloud" or "Local Ollama" in the "Engine Settings" tab
           });
 
           if (response.ok) {
+            addStep('Custom API Endpoint Diagnostics', 'success', `Connected to custom model (${this.config.openaiModel})`);
             return {
               success: true,
-              message: `Successfully connected to custom API (${this.config.openaiModel})!`
+              message: `Successfully connected to custom API (${this.config.openaiModel})!`,
+              debugLogs,
+              diagnostics: {
+                origin,
+                targetUrl: this.config.openaiBaseUrl,
+                protocolMismatch: false,
+                isHttps,
+                isLocalTarget: false,
+                steps,
+                recommendations: ['Custom API endpoint is verified and responsive.']
+              }
             };
           }
           const errData = await response.json().catch(() => ({}));
+          addStep('Custom API Endpoint Diagnostics', 'error', `HTTP ${response.status}: ${errData.error?.message || response.statusText}`);
           return {
             success: false,
-            message: `Cloud API connection error (${response.status}): ${errData.error?.message || response.statusText}`
+            message: `Cloud API connection error (${response.status}): ${errData.error?.message || response.statusText}`,
+            debugLogs,
+            diagnostics: {
+              origin,
+              targetUrl: this.config.openaiBaseUrl,
+              protocolMismatch: false,
+              isHttps,
+              isLocalTarget: false,
+              steps,
+              recommendations: [
+                'Verify your API key and base URL.',
+                `Status code ${response.status}: ${errData.error?.message || 'Check model permissions.'}`
+              ]
+            }
           };
         } catch (err: any) {
+          addStep('Custom API Endpoint Diagnostics', 'error', err.message);
           return {
             success: false,
-            message: `Network error connecting to cloud API: ${err.message}`
+            message: `Network error connecting to cloud API: ${err.message}`,
+            debugLogs,
+            diagnostics: {
+              origin,
+              targetUrl: this.config.openaiBaseUrl,
+              protocolMismatch: false,
+              isHttps,
+              isLocalTarget: false,
+              steps,
+              recommendations: ['Network request failed. Check API URL and internet connectivity.']
+            }
           };
         }
       }

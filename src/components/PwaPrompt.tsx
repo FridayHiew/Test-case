@@ -1,44 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Download, Sparkles, X } from 'lucide-react';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 
 export default function PwaPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showBanner, setShowBanner] = useState(false);
+  const { isInstallable, isInstalled, install } = usePWAInstall();
+  const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      // Prevent Chrome 67 and earlier from automatically showing the prompt
-      e.preventDefault();
-      // Stash the event so it can be triggered later.
-      setDeferredPrompt(e);
-      setShowBanner(true);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    // Also check if app is already running in standalone mode
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setShowBanner(false);
-    }
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
-  }, []);
+  // If already installed, not installable via event, or user dismissed, hide banner
+  if (isInstalled || !isInstallable || dismissed) return null;
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    // Show the prompt
-    deferredPrompt.prompt();
-    // Wait for the user to respond to the prompt
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User response to install prompt: ${outcome}`);
-    // We've used the prompt, and can't use it again
-    setDeferredPrompt(null);
-    setShowBanner(false);
+    await install();
   };
-
-  if (!showBanner) return null;
 
   return (
     <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-xl shadow-md p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shrink-0 transition-all duration-300">
@@ -47,14 +20,14 @@ export default function PwaPrompt() {
           <Sparkles className="w-5 h-5 text-blue-200" />
         </div>
         <div className="space-y-0.5 min-w-0">
-          <h4 className="text-sm font-semibold truncate">Install AI Test Case Generator to your device</h4>
+          <h4 className="text-sm font-semibold truncate">Install AI Test Case Generator v1.01 to your device</h4>
           <p className="text-xs text-blue-100">Run as a standalone desktop app with full offline capabilities.</p>
         </div>
       </div>
       <div className="flex items-center space-x-3 shrink-0 self-end sm:self-center">
         <button
           type="button"
-          onClick={() => setShowBanner(false)}
+          onClick={() => setDismissed(true)}
           className="text-xs text-blue-100 hover:text-white px-2.5 py-1.5 rounded transition"
         >
           Not Now
@@ -71,3 +44,4 @@ export default function PwaPrompt() {
     </div>
   );
 }
+

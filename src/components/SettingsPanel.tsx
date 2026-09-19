@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { AIConfig, BaseCaseTemplate } from '../types';
+import { AIConfig, BaseCaseTemplate, ConnectionTestResult } from '../types';
 import { LLMClient, checkWebGPUAvailability, DEFAULT_BASE_TEMPLATES } from '../services/llm';
-import { Settings, Cpu, Cloud, CheckCircle, XCircle, RefreshCw, Sliders, Sparkles, AlertCircle, Database, HardDrive, Terminal, Activity, RotateCcw, Trash2, Edit3, Save, Plus, X } from 'lucide-react';
+import { 
+  Settings, Cpu, Cloud, CheckCircle, XCircle, RefreshCw, Sliders, Sparkles, 
+  AlertCircle, Database, HardDrive, Terminal, Activity, RotateCcw, Trash2, 
+  Edit3, Save, Plus, X, Copy, Check, ShieldAlert, ChevronDown, ChevronUp, 
+  ExternalLink, Globe, Wifi, WifiOff, AlertTriangle, Zap, Info
+} from 'lucide-react';
 
 interface SettingsPanelProps {
   config: AIConfig;
@@ -85,8 +90,12 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
     tested: boolean;
     success: boolean;
     message: string;
+    diagnostics?: ConnectionTestResult['diagnostics'];
+    debugLogs?: string[];
   }>({ tested: false, success: false, message: '' });
   const [isTesting, setIsTesting] = useState(false);
+  const [showDebugDetails, setShowDebugDetails] = useState(false);
+  const [copiedReport, setCopiedReport] = useState(false);
 
   // Apply state changes to parent config
   const saveConfig = (updatedFields: Partial<AIConfig>) => {
@@ -100,6 +109,7 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
     setConnectionStatus({ tested: false, success: false, message: '' });
     setProgressText('');
     setProgressPercent(0);
+    setShowDebugDetails(false);
   };
 
   const handleTestConnection = async () => {
@@ -129,17 +139,60 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
       setConnectionStatus({
         tested: true,
         success: res.success,
-        message: res.message
+        message: res.message,
+        diagnostics: res.diagnostics,
+        debugLogs: res.debugLogs
       });
+      // Automatically open diagnostics details if there are any warnings or errors
+      if (!res.success || (res.diagnostics && res.diagnostics.steps.some(s => s.status === 'warning' || s.status === 'error'))) {
+        setShowDebugDetails(true);
+      }
     } catch (err: any) {
       setConnectionStatus({
         tested: true,
         success: false,
-        message: err.message || '测试连接时发生未知错误。'
+        message: err.message || 'Error executing connection test.'
       });
+      setShowDebugDetails(true);
     } finally {
       setIsTesting(false);
     }
+  };
+
+  const copyDiagnosticReport = () => {
+    if (!connectionStatus.diagnostics) return;
+    const diag = connectionStatus.diagnostics;
+    const lines = [
+      `=== AI Connection Diagnostic Report ===`,
+      `Timestamp: ${new Date().toISOString()}`,
+      `App Origin: ${diag.origin} (${diag.isHttps ? 'HTTPS' : 'HTTP'})`,
+      `Target URL: ${diag.targetUrl}`,
+      `AI Mode: ${config.aiMode}`,
+      `Protocol Mismatch: ${diag.protocolMismatch ? 'YES (Mixed Content: HTTPS app querying HTTP target)' : 'NO'}`,
+      `Error Classification: ${diag.errorType || 'None'}`,
+      `Raw Error: ${diag.rawError || 'None'}`,
+      ``,
+      `--- Diagnostic Probe Steps ---`,
+      ...(diag.steps || []).map(s => `[${s.timestamp}] [${s.status.toUpperCase()}] ${s.step}: ${s.details || ''}`),
+      ``,
+      `--- Recommendations & Fixes ---`,
+      ...(diag.recommendations || []).map(r => `* ${r}`),
+      ``,
+      `--- Browser & Runtime Details ---`,
+      `User Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown'}`,
+      `WebGPU Supported: ${isWebGpuSupported ? 'YES' : 'NO'}`
+    ];
+    navigator.clipboard.writeText(lines.join('\n'));
+    setCopiedReport(true);
+    setTimeout(() => setCopiedReport(false), 2500);
+  };
+
+  const applyAlternativeUrl = (url: string) => {
+    setOllamaUrl(url);
+    saveConfig({ ollamaUrl: url });
+    setTimeout(() => {
+      handleTestConnection();
+    }, 100);
   };
 
   const handleResetWebGpu = async () => {
@@ -235,7 +288,12 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
             <Settings className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">AI Core Settings</h2>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-lg font-semibold text-slate-900">AI Core Settings</h2>
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-blue-50 text-blue-700 border border-blue-200">
+                v1.01
+              </span>
+            </div>
             <p className="text-xs text-slate-500">Configure engine backend, model parameters, and API options</p>
           </div>
         </div>
@@ -469,7 +527,39 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
       ) : config.aiMode === 'offline' ? (
         <div className="space-y-4 pt-2 border-t border-slate-100">
           <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Ollama Host URL</label>
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ollama Host URL</label>
+              <div className="flex items-center space-x-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOllamaUrl('http://localhost:11434');
+                    saveConfig({ ollamaUrl: 'http://localhost:11434' });
+                  }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition font-mono ${
+                    ollamaUrl === 'http://localhost:11434'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200 font-semibold'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  localhost
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOllamaUrl('http://127.0.0.1:11434');
+                    saveConfig({ ollamaUrl: 'http://127.0.0.1:11434' });
+                  }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition font-mono ${
+                    ollamaUrl === 'http://127.0.0.1:11434'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200 font-semibold'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  127.0.0.1
+                </button>
+              </div>
+            </div>
             <input
               type="text"
               value={ollamaUrl}
@@ -477,9 +567,17 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
                 setOllamaUrl(e.target.value);
                 saveConfig({ ollamaUrl: e.target.value });
               }}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+              className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
               placeholder="http://localhost:11434"
             />
+            {typeof window !== 'undefined' && window.location.protocol === 'https:' && (
+              <div className="mt-1.5 p-2 bg-amber-50/80 border border-amber-200/70 rounded-lg text-[11px] text-amber-800 flex items-start space-x-1.5 leading-relaxed">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  <strong>HTTPS PWA Notice:</strong> Installed from GitHub Pages over HTTPS. If connecting to local HTTP fails, use the <strong>Test AI Connection & Debugger</strong> below to view the browser policy diagnostics.
+                </span>
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Local Model Name</label>
@@ -491,9 +589,9 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
                 saveConfig({ ollamaModel: e.target.value });
               }}
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              placeholder="e.g. qwen2.5:0.5b, llama3.2:1b"
+              placeholder="e.g. llama3.2, qwen2.5:0.5b"
             />
-            <p className="text-[11px] text-slate-400 mt-1">Lightweight models are recommended for rapid local response time.</p>
+            <p className="text-[11px] text-slate-400 mt-1">Make sure you ran &quot;ollama pull {ollamaModel || 'llama3.2'}&quot; on your laptop.</p>
           </div>
         </div>
       ) : (
@@ -761,20 +859,23 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
         )}
 
         {/* Diagnostics / Test Connection */}
-        <div className="pt-2 space-y-2.5">
+        <div className="pt-2 space-y-3">
           <button
             type="button"
             onClick={handleTestConnection}
             disabled={isTesting}
-            className="w-full flex items-center justify-center py-2 px-4 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 active:bg-slate-100 transition disabled:opacity-65"
+            className="w-full flex items-center justify-center py-2.5 px-4 border border-blue-200 rounded-lg text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 active:bg-blue-200 transition disabled:opacity-65 shadow-sm"
           >
             {isTesting ? (
               <>
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Diagnosing Connection...
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin text-blue-600" />
+                Probing & Debugging Connection...
               </>
             ) : (
-              'Test AI Connection'
+              <>
+                <Wifi className="w-4 h-4 mr-2 text-blue-600" />
+                Test AI Connection & Debug Network
+              </>
             )}
           </button>
 
@@ -797,19 +898,205 @@ export default function SettingsPanel({ config, onConfigChange, llmClient }: Set
           )}
 
           {connectionStatus.tested && (
-            <div
-              className={`p-3 rounded-lg border flex items-start space-x-2 text-xs leading-relaxed ${
-                connectionStatus.success
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-100'
-                  : 'bg-rose-50 text-rose-800 border-rose-100'
-              }`}
-            >
-              {connectionStatus.success ? (
-                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              ) : (
-                <XCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="space-y-3">
+              {/* Main Result Banner */}
+              <div
+                className={`p-3.5 rounded-xl border flex items-start justify-between text-xs leading-relaxed shadow-sm ${
+                  connectionStatus.success
+                    ? 'bg-emerald-50/90 text-emerald-900 border-emerald-200'
+                    : 'bg-rose-50/90 text-rose-900 border-rose-200'
+                }`}
+              >
+                <div className="flex items-start space-x-2.5">
+                  {connectionStatus.success ? (
+                    <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1">
+                    <div className="font-bold text-sm">
+                      {connectionStatus.success ? 'Connection Operational' : 'Connection Blocked or Failed'}
+                    </div>
+                    <div className="text-xs text-slate-700">{connectionStatus.message}</div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowDebugDetails(!showDebugDetails)}
+                  className="shrink-0 ml-2 inline-flex items-center px-2 py-1 text-[11px] font-medium rounded-lg bg-white/80 hover:bg-white border border-slate-200 text-slate-700 transition"
+                >
+                  {showDebugDetails ? (
+                    <>
+                      <span>Hide Debugger</span>
+                      <ChevronUp className="w-3.5 h-3.5 ml-1" />
+                    </>
+                  ) : (
+                    <>
+                      <span>View Debug Details</span>
+                      <ChevronDown className="w-3.5 h-3.5 ml-1" />
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Detailed Connection Inspector & Debugger */}
+              {showDebugDetails && connectionStatus.diagnostics && (
+                <div className="bg-slate-900 text-slate-200 border border-slate-800 rounded-xl p-4 space-y-4 text-xs shadow-lg">
+                  {/* Inspector Header */}
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center space-x-2">
+                      <Terminal className="w-4 h-4 text-cyan-400" />
+                      <span className="font-bold font-sans text-sm text-white">Connection Diagnostics Inspector</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={copyDiagnosticReport}
+                      className="inline-flex items-center px-2.5 py-1 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition border border-slate-700"
+                    >
+                      {copiedReport ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 mr-1 text-emerald-400" />
+                          <span className="text-emerald-400 font-semibold">Report Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 mr-1" />
+                          <span>Copy Diagnostic Report</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Context Metrics Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+                    <div className="p-2 rounded bg-slate-800/80 border border-slate-700/60">
+                      <span className="text-slate-400 text-[10px] block font-sans uppercase">App Host Origin</span>
+                      <span className="text-white font-medium truncate block">{connectionStatus.diagnostics.origin}</span>
+                      <span className="text-[10px] text-cyan-300">
+                        {connectionStatus.diagnostics.isHttps ? '🔒 Secure Origin (HTTPS)' : '🔓 Plain HTTP'}
+                      </span>
+                    </div>
+
+                    <div className="p-2 rounded bg-slate-800/80 border border-slate-700/60">
+                      <span className="text-slate-400 text-[10px] block font-sans uppercase">Target AI Endpoint</span>
+                      <span className="text-white font-medium truncate block">{connectionStatus.diagnostics.targetUrl}</span>
+                      <span className="text-[10px] text-slate-400">
+                        Backend: <strong className="text-cyan-300">{config.aiMode}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Root Cause Alert & Quick Actions */}
+                  {connectionStatus.diagnostics.errorType === 'PNA_OR_MIXED_CONTENT' && (
+                    <div className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-600/50 space-y-2.5 text-amber-200">
+                      <div className="flex items-center space-x-2 text-amber-300 font-bold text-xs">
+                        <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Root Cause: Browser Mixed Content & Private Network Access Policy</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-amber-200/90">
+                        Your PWA is served over <strong>HTTPS</strong> (GitHub Pages), but local Ollama runs on <strong>HTTP</strong> (<code className="bg-amber-900/60 px-1 py-0.5 rounded text-amber-100">{connectionStatus.diagnostics.targetUrl}</code>). 
+                        Modern Chromium browsers automatically reject cross-origin requests from public web domains to private localhost IPs unless explicitly authorized.
+                      </p>
+
+                      {/* Quick Fixes */}
+                      <div className="space-y-1.5 pt-1 text-[11px]">
+                        <div className="font-semibold text-amber-300 font-sans">Recommended Resolutions:</div>
+                        <div className="p-2 bg-slate-900/90 rounded border border-amber-800/50 space-y-1 text-slate-300">
+                          <div>
+                            <span className="text-emerald-400 font-bold">1. Chrome Flag (Instant Fix):</span> Open a new tab to <code className="bg-slate-800 text-amber-300 px-1 py-0.5 rounded select-all font-mono">chrome://flags/#block-insecure-private-network-requests</code>, set to <strong>Disabled</strong>, then restart your browser.
+                          </div>
+                          <div>
+                            <span className="text-emerald-400 font-bold">2. PWA Site Settings:</span> Click the lock / tune icon in your address bar / PWA window ➔ <em>Site settings</em> ➔ change <strong>Insecure content</strong> to <strong>Allow</strong>.
+                          </div>
+                          <div>
+                            <span className="text-emerald-400 font-bold">3. Start Ollama with CORS:</span> Make sure Ollama was run with <code className="bg-slate-800 text-amber-300 px-1 py-0.5 rounded select-all font-mono">OLLAMA_ORIGINS=&quot;*&quot; ollama serve</code>.
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Fallback button to switch to Transformers.js */}
+                      <div className="pt-1 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleModeChange('transformersjs')}
+                          className="inline-flex items-center px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-sans text-xs font-semibold shadow transition"
+                        >
+                          <Zap className="w-3.5 h-3.5 mr-1.5 text-yellow-300" />
+                          Switch to In-Browser Transformers.js (Zero Network / 100% Offline)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Alternative Suggestion (e.g. 127.0.0.1 responded!) */}
+                  {connectionStatus.diagnostics.alternativeSuggestion && (
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-600/50 rounded-lg flex items-center justify-between text-xs text-emerald-200">
+                      <div className="flex items-center space-x-2">
+                        <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Alternative IP <strong className="text-white">{connectionStatus.diagnostics.alternativeSuggestion.url}</strong> responded successfully!</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applyAlternativeUrl(connectionStatus.diagnostics!.alternativeSuggestion!.url)}
+                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium text-xs transition shrink-0"
+                      >
+                        {connectionStatus.diagnostics.alternativeSuggestion.label}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Step-by-Step Diagnostic Probes */}
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
+                      Diagnostic Probe Sequence
+                    </div>
+                    <div className="space-y-1 font-mono text-[11px]">
+                      {connectionStatus.diagnostics.steps.map((s, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2 rounded bg-slate-800/60 border border-slate-700/40 flex items-start space-x-2"
+                        >
+                          {s.status === 'success' ? (
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          ) : s.status === 'error' ? (
+                            <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                          ) : s.status === 'warning' ? (
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                          )}
+                          <div className="space-y-0.5 flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-slate-200">{s.step}</span>
+                              <span className="text-[10px] text-slate-500">{s.timestamp}</span>
+                            </div>
+                            {s.details && (
+                              <div className="text-[10px] text-slate-400 break-words leading-relaxed">
+                                {s.details}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Raw Debug Logs Accordion */}
+                  {connectionStatus.debugLogs && connectionStatus.debugLogs.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
+                        Raw Network Console Logs
+                      </div>
+                      <div className="bg-black/60 p-2.5 rounded border border-slate-800 font-mono text-[10px] text-emerald-400 max-h-32 overflow-y-auto space-y-0.5">
+                        {connectionStatus.debugLogs.map((log, i) => (
+                          <div key={i} className="leading-tight break-all">{log}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
-              <div>{connectionStatus.message}</div>
             </div>
           )}
         </div>

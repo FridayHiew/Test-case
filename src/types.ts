@@ -93,3 +93,31 @@ export interface AIConfig {
   // Customizable Baseline Templates
   programmaticTemplates?: BaseCaseTemplate[];
 }
+
+export interface DiagnosticStep {
+  step: string;
+  status: 'pending' | 'success' | 'warning' | 'error' | 'info';
+  details?: string;
+  timestamp: string;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+  debugLogs?: string[];
+  diagnostics?: {
+    origin: string;
+    targetUrl: string;
+    protocolMismatch: boolean;
+    isHttps: boolean;
+    isLocalTarget: boolean;
+    errorType?: 'PNA_OR_MIXED_CONTENT' | 'CORS_ERROR' | 'OFFLINE_OR_UNREACHABLE' | 'TIMEOUT' | 'WRONG_PORT_OR_ENDPOINT' | 'UNKNOWN';
+    rawError?: string;
+    steps: DiagnosticStep[];
+    recommendations: string[];
+    alternativeSuggestion?: {
+      label: string;
+      url: string;
+    };
+  };
+}
