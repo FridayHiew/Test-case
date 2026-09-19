@@ -109,15 +109,24 @@ export default function App() {
       
       const count = await db.getCacheCount();
       setCacheCount(count);
-      
-      setIsInitialized(true);
     } catch (err) {
       console.error('Failed to initialize app database:', err);
+    } finally {
+      setIsInitialized(true);
     }
   };
 
   useEffect(() => {
-    initApp();
+    // Safety guard to ensure app ALWAYS renders even if IndexedDB takes long or fails
+    const timer = setTimeout(() => {
+      setIsInitialized(true);
+    }, 2500);
+
+    initApp().finally(() => {
+      clearTimeout(timer);
+    });
+
+    return () => clearTimeout(timer);
   }, [db]);
 
   const refreshFeatures = async () => {

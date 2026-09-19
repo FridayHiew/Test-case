@@ -10,14 +10,73 @@
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased">
     <div id="root"></div>
-    <script type="module" src="./src/main.tsx"></script>
+    <script type="module" src="/src/main.tsx"></script>
     <script>
+      // 1. Automatically recover from stale chunk hashes after deployments
+      window.addEventListener('vite:preloadError', () => {
+        console.warn('Vite chunk preload error detected, reloading page to fetch latest version...');
+        window.location.reload();
+      });
+
+      // 2. Global resource load failure catcher (captures 404s on script/link tags)
+      window.addEventListener('error', async (e) => {
+        const target = e.target;
+        if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+          const src = target.src || target.href || '';
+          if (src.includes('/assets/') || src.includes('.js') || src.includes('.css')) {
+            console.warn('Asset load failure detected on:', src);
+            const retryKey = 'sw_asset_retry_' + (src.split('/').pop() || 'chunk');
+            if (!sessionStorage.getItem(retryKey)) {
+              sessionStorage.setItem(retryKey, '1');
+              if ('caches' in window) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+              }
+              if ('serviceWorker' in navigator) {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map((r) => r.unregister()));
+              }
+              window.location.reload();
+            }
+          }
+        }
+      }, true);
+
+      // 3. Service Worker registration and lifecycle management
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('./sw.js')
-            .then((reg) => console.log('Service Worker registered successfully!', reg.scope))
-            .catch((err) => console.error('Service Worker registration failed:', err));
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!refreshing) {
+            refreshing = true;
+            window.location.reload();
+          }
         });
+
+        const isDevOrPreview = window.location.hostname === 'localhost' || 
+                               window.location.hostname === '127.0.0.1' || 
+                               window.location.hostname.includes('run.app');
+        if (isDevOrPreview) {
+          // In dev/preview, unregister SW and purge cache so edits instantly reflect
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (const registration of registrations) {
+              registration.unregister();
+            }
+          });
+          if ('caches' in window) {
+            caches.keys().then((keys) => {
+              for (const key of keys) caches.delete(key);
+            });
+          }
+        } else {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+              .then((reg) => {
+                console.log('Service Worker registered successfully!', reg.scope);
+                reg.update();
+              })
+              .catch((err) => console.warn('Service Worker registration skipped:', err));
+          });
+        }
       }
     </script>
   </body>
